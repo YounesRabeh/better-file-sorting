@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320" role="img" aria-labelledby="title desc">
+  <title id="title">Better File Sorting</title>
+  <desc id="desc">Better File Sorting beside an amber archive branching into three neatly arranged violet files.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1280" y2="320" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#11121C"/>
+      <stop offset="1" stop-color="#211A30"/>
+    </linearGradient>
+    <radialGradient id="light">
+      <stop stop-color="#9D76ED" stop-opacity=".13"/>
+      <stop offset="1" stop-color="#9D76ED" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="320" rx="24" fill="url(#background)"/>
+  <ellipse cx="1000" cy="160" rx="340" ry="240" fill="url(#light)"/>
+  <rect x=".5" y=".5" width="1279" height="319" rx="23.5" fill="none" stroke="#FFFFFF" stroke-opacity=".07"/>
+  <text x="72" y="180" fill="#F8F5FF" font-family="DejaVu Sans, Arial, sans-serif" font-size="52" font-weight="700" letter-spacing="-2">Better File Sorting</text>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M887 160H950M950 160V96H1014M950 160H1014M950 160V224H1014" stroke="#806599" stroke-width="2"/>
+    <circle cx="950" cy="160" r="4" fill="#C8ACF9" stroke="none"/>
+    <rect x="799" y="112" width="88" height="96" rx="14" fill="#FFBB70" fill-opacity=".08" stroke="#FFBB70" stroke-width="2"/>
+    <path d="M843 114V145M837 125H849M837 136H849" stroke="#FFBB70" stroke-width="2.5"/>
+    <rect x="836" y="148" width="14" height="21" rx="4" stroke="#FFBB70" stroke-width="2"/>
+    <path d="M821 190H865" stroke="#FFBB70" stroke-opacity=".4" stroke-width="2"/>
+    <g fill="#2D233D" stroke="#AF8BD9" stroke-width="1.5">
+      <rect x="1014" y="73" width="154" height="46" rx="10"/>
+      <rect x="1014" y="137" width="154" height="46" rx="10"/>
+      <rect x="1014" y="201" width="154" height="46" rx="10"/>
+    </g>
+    <g stroke="#DDC8FA" stroke-width="1.5">
+      <path d="M1032 85H1042L1048 91V107H1032ZM1042 85V91H1048"/>
+      <path d="M1032 149H1042L1048 155V171H1032ZM1042 149V155H1048"/>
+      <path d="M1032 213H1042L1048 219V235H1032ZM1042 213V219H1048"/>
+    </g>
+    <g stroke="#A18AB9" stroke-width="2" stroke-opacity=".65">
+      <path d="M1064 91H1148M1064 101H1120"/>
+      <path d="M1064 155H1148M1064 165H1120"/>
+      <path d="M1064 219H1148M1064 229H1120"/>
+    </g>
+  </g>
+</svg>

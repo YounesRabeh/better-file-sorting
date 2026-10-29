@@ -1,5 +1,7 @@
 # malware-organizer
 
+[< Back to malware-organizer](../README.md) • [Documentation Hub](README.md)
+
 `malware-organizer` ingests ZIP archives into content-addressed storage without executing or opening extracted payloads. It records provenance and builds metadata-driven views with runtime TOML rules.
 
 The default `sealed` mode stores payloads with owner-only access removed (`0000`) after streaming validation. This is a permission policy, not a sandbox; use a dedicated unprivileged account and an isolated VM or container for malware handling.

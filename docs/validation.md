@@ -1,5 +1,7 @@
 # Implementation and validation record
 
+[< Back to malware-organizer](../README.md) • [Documentation Hub](README.md)
+
 Validated on 2026-10-29 using Rust 1.99.0, Linux x86-64, as uid 1000. This is a pre-release implementation, not a v1.0 release certification.
 
 ## Plan coverage
