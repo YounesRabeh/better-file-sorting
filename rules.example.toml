@@ -1,0 +1,40 @@
+version = 1
+
+[organization]
+duplicates = "first_only"
+view_mode = "hardlink" # or "manifest": no payload links
+default_directory = "{file_type}"
+default_filename = "{sha256}.sample"
+
+[[rules]]
+name = "Encrypted PDFs"
+[rules.match]
+file_type = "pdf"
+encrypted = true
+[rules.output]
+directory = "encrypted/pdf"
+filename = "{sha256}.sample"
+
+[[rules]]
+name = "Windows executables"
+[rules.match]
+file_type = "pe"
+[rules.output]
+directory = "executables/windows"
+filename = "{original_stem}-{sha256}.sample"
+
+[[rules]]
+name = "Linux executables"
+[rules.match]
+file_type = "elf"
+[rules.output]
+directory = "executables/linux"
+filename = "{sha256}.sample"
+
+[[rules]]
+name = "Small samples"
+[rules.match]
+max_size = 65536
+[rules.output]
+directory = "small/{file_type}"
+filename = "{sha256}.sample"

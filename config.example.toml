@@ -1,0 +1,18 @@
+inputs = ["downloads"]
+output = "repository"
+recursive = true
+workers = 4
+# password_file = "passwords.txt" # Private local file, one candidate per line
+# rules = "rules.toml"
+
+[security]
+mode = "sealed"
+restrict_directories = true
+allow_automatic_unsealing = false
+
+[limits]
+max_entry_bytes = 268435456
+max_archive_bytes = 1073741824
+max_input_bytes = 1073741824
+max_entries = 10000
+max_expansion_ratio = 1000

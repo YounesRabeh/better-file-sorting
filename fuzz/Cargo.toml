@@ -1,0 +1,23 @@
+[package]
+name = "malware-organizer-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+malware-organizer = { path = ".." }
+zip = { version = "=9.1.3", default-features = false, features = ["deflate", "aes-crypto"] }
+
+[[bin]]
+name = "untrusted_inputs"
+path = "fuzz_targets/untrusted_inputs.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

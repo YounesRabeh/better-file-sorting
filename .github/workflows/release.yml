@@ -1,0 +1,104 @@
+name: Draft Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag identifies main HEAD
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          tag_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          main_commit="$(git rev-parse refs/remotes/origin/main)"
+          test "$tag_commit" = "$main_commit"
+
+      - name: Verify tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os, tomllib
+          with open('Cargo.toml', 'rb') as source:
+              version = tomllib.load(source)['package']['version']
+          assert os.environ['RELEASE_TAG'] == f'v{version}', 'Release tag must match package version'
+          PY
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Qualify release
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo nextest run --workspace --all-targets --locked
+          cargo build --release --locked -p malware-organizer --bin malware-organizer
+          target/release/malware-organizer --version
+
+      - name: Package executable and checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          package="malware-organizer-$RELEASE_TAG-$host"
+          mkdir -p "release-package/$package" release-assets
+          install -m 755 target/release/malware-organizer "release-package/$package/malware-organizer"
+          cp LICENSE "release-package/$package/"
+          cp docs/RELEASE_README.md "release-package/$package/README.md"
+          tar -czf "release-assets/$package.tar.gz" -C release-package "$package"
+          install -m 755 target/release/malware-organizer release-assets/malware-organizer
+          cd release-assets
+          sha256sum malware-organizer *.tar.gz > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: malware-organizer-${{ github.sha }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: qualify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: malware-organizer-${{ github.sha }}
+          path: release-assets
+
+      - name: Verify downloaded checksums
+        working-directory: release-assets
+        run: sha256sum --check SHA256SUMS
+
+      - name: Create GitHub release draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --draft \
+            --title "malware-organizer $RELEASE_TAG" \
+            --generate-notes

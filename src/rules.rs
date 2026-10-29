@@ -1,0 +1,357 @@
+use crate::metadata::Occurrence;
+use anyhow::{Result, ensure};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
+use unicode_normalization::UnicodeNormalization;
+
+const FIELDS: &[&str] = &[
+    "file_type",
+    "original_name",
+    "original_stem",
+    "original_extension",
+    "sha256",
+    "size",
+    "encrypted",
+    "duplicate",
+    "source_archive",
+    "ingest_date",
+    "occurrence_id",
+];
+#[derive(Debug, Serialize)]
+pub struct Planned {
+    pub path: String,
+    pub sha256: String,
+    pub occurrence_id: String,
+}
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Duplicates {
+    #[default]
+    FirstOnly,
+    All,
+    OnlyDuplicates,
+    Separate,
+}
+#[derive(Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewMode {
+    #[default]
+    Hardlink,
+    Manifest,
+}
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Organization {
+    pub duplicates: Duplicates,
+    pub view_mode: ViewMode,
+    pub default_directory: String,
+    pub default_filename: String,
+}
+impl Default for Organization {
+    /// Return default duplicate handling and safe sample templates.
+    fn default() -> Self {
+        Self {
+            duplicates: Duplicates::FirstOnly,
+            view_mode: ViewMode::Hardlink,
+            default_directory: "{file_type}".into(),
+            default_filename: "{sha256}.sample".into(),
+        }
+    }
+}
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Matcher {
+    pub file_type: Option<String>,
+    pub original_extension: Option<String>,
+    pub encrypted: Option<bool>,
+    pub duplicate: Option<bool>,
+    pub min_size: Option<u64>,
+    pub max_size: Option<u64>,
+}
+impl Matcher {
+    /// Check whether this matcher accepts one occurrence.
+    fn matches(&self, row: &Occurrence, duplicate: bool) -> bool {
+        self.file_type.as_ref().is_none_or(|v| v == &row.file_type)
+            && self
+                .original_extension
+                .as_ref()
+                .is_none_or(|v| v.eq_ignore_ascii_case(&row.original_extension))
+            && self.encrypted.is_none_or(|v| v == row.encrypted)
+            && self.duplicate.is_none_or(|v| v == duplicate)
+            && self.min_size.is_none_or(|v| row.size >= v)
+            && self.max_size.is_none_or(|v| row.size <= v)
+    }
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Output {
+    pub directory: String,
+    pub filename: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Rule {
+    pub name: String,
+    #[serde(default, rename = "match")]
+    pub matcher: Matcher,
+    pub output: Output,
+}
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Rules {
+    pub version: u32,
+    pub organization: Organization,
+    pub rules: Vec<Rule>,
+}
+impl Default for Rules {
+    /// Return a version-one ruleset with its fallback organization.
+    fn default() -> Self {
+        Self {
+            version: 1,
+            organization: Organization::default(),
+            rules: vec![],
+        }
+    }
+}
+/// Validate a directory or filename template and its placeholders.
+fn template(text: &str, filename: bool) -> Result<()> {
+    ensure!(
+        !text.is_empty() && text.len() <= 1024,
+        "empty or overlong template"
+    );
+    ensure!(
+        !text.starts_with('/')
+            && !text.contains(['\\', ':'])
+            && !text.chars().any(char::is_control),
+        "unsafe template path"
+    );
+    ensure!(
+        !text
+            .split('/')
+            .any(|p| p.is_empty() || p == "." || p == ".."),
+        "unsafe template component"
+    );
+    ensure!(
+        text.split('/').count() <= 8,
+        "directory template exceeds 8 components"
+    );
+    if filename {
+        ensure!(
+            !text.contains('/') && text.ends_with(".sample"),
+            "filename must be one component ending in .sample"
+        );
+    }
+    let mut rest = text;
+    while let Some(start) = rest.find('{') {
+        ensure!(!rest[..start].contains('}'), "unmatched template brace");
+        let end = rest[start + 1..]
+            .find('}')
+            .ok_or_else(|| anyhow::anyhow!("unmatched template brace"))?
+            + start
+            + 1;
+        ensure!(
+            FIELDS.contains(&&rest[start + 1..end]),
+            "unknown template placeholder"
+        );
+        rest = &rest[end + 1..];
+    }
+    ensure!(!rest.contains('}'), "unmatched template brace");
+    Ok(())
+}
+/// Normalize metadata into a safe single path component.
+pub fn sanitize(value: &str) -> String {
+    let normalized: String = value
+        .nfc()
+        .map(|c| {
+            if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let mut result = String::new();
+    for c in normalized.trim_matches([' ', '.']).chars() {
+        if result.len() + c.len_utf8() > 120 {
+            break;
+        }
+        result.push(c);
+    }
+    if result.is_empty() {
+        result.push('_');
+    }
+    let stem = result.split('.').next().unwrap_or("").to_ascii_uppercase();
+    if [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9", "COM¹",
+        "COM²", "COM³", "LPT¹", "LPT²", "LPT³",
+    ]
+    .contains(&stem.as_str())
+    {
+        result.insert(0, '_');
+    }
+    result
+}
+/// Render a validated template using one occurrence's metadata.
+fn render(text: &str, row: &Occurrence, duplicate: bool) -> String {
+    let mut result = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find('{') {
+        result.push_str(&rest[..start]);
+        let end = rest[start..].find('}').expect("validated template") + start;
+        let value = match &rest[start + 1..end] {
+            "file_type" => row.file_type.clone(),
+            "original_name" => row.original_name.clone(),
+            "original_stem" => row.original_stem.clone(),
+            "original_extension" => row.original_extension.clone(),
+            "sha256" => row.sha256.clone(),
+            "size" => row.size.to_string(),
+            "encrypted" => row.encrypted.to_string(),
+            "duplicate" => duplicate.to_string(),
+            "source_archive" => row.source_archive.clone(),
+            "ingest_date" => row.ingest_date.clone(),
+            "occurrence_id" => row.occurrence_id.clone(),
+            _ => unreachable!("validated template"),
+        };
+        result.push_str(&sanitize(&value));
+        rest = &rest[end + 1..];
+    }
+    result.push_str(rest);
+    result
+}
+impl Rules {
+    /// Parse and validate a TOML rules document.
+    pub fn parse(text: &str) -> Result<Self> {
+        let result: Self = toml::from_str(text).map_err(|_| {
+            anyhow::anyhow!("invalid rules TOML, unknown field, or unsupported value")
+        })?;
+        result.validate()?;
+        Ok(result)
+    }
+    /// Load rules from an optional file or return defaults.
+    pub fn load(path: Option<&Path>) -> Result<Self> {
+        match path {
+            Some(path) => Self::parse(&std::fs::read_to_string(path)?),
+            None => Ok(Self::default()),
+        }
+    }
+    /// Validate rule version, templates, matchers, and output constraints.
+    pub fn validate(&self) -> Result<()> {
+        ensure!(self.version == 1, "unsupported rules version");
+        template(&self.organization.default_directory, false)?;
+        template(&self.organization.default_filename, true)?;
+        for rule in &self.rules {
+            ensure!(!rule.name.trim().is_empty(), "rule name must not be empty");
+            template(&rule.output.directory, false)?;
+            template(&rule.output.filename, true)?;
+            ensure!(
+                rule.matcher.min_size.unwrap_or(0) <= rule.matcher.max_size.unwrap_or(u64::MAX),
+                "invalid size range"
+            );
+            if let Some(kind) = &rule.matcher.file_type {
+                ensure!(
+                    [
+                        "pe", "elf", "macho", "pdf", "zip", "text", "other", "unknown"
+                    ]
+                    .contains(&kind.as_str()),
+                    "unsupported file type"
+                );
+            }
+        }
+        Ok(())
+    }
+    /// Build a deterministic, collision-safe logical view plan.
+    pub fn plan(&self, records: &[Occurrence]) -> Result<Vec<Planned>> {
+        self.validate()?;
+        let mut sorted: Vec<_> = records.iter().collect();
+        sorted.sort_by(|a, b| {
+            (&a.source_path, a.entry_index, &a.occurrence_id).cmp(&(
+                &b.source_path,
+                b.entry_index,
+                &b.occurrence_id,
+            ))
+        });
+        let mut counts = BTreeMap::new();
+        for row in &sorted {
+            row.validate()?;
+            *counts.entry(&row.sha256).or_insert(0usize) += 1;
+        }
+        let mut seen = BTreeSet::new();
+        let mut paths = BTreeSet::from(["layout.jsonl".to_string()]);
+        let mut directories = BTreeSet::new();
+        let mut result = vec![];
+        for row in sorted {
+            let duplicate = counts[&row.sha256] > 1;
+            let first = seen.insert(&row.sha256);
+            if matches!(self.organization.duplicates, Duplicates::FirstOnly) && !first
+                || matches!(self.organization.duplicates, Duplicates::OnlyDuplicates) && !duplicate
+            {
+                continue;
+            }
+            let output = self
+                .rules
+                .iter()
+                .find(|rule| rule.matcher.matches(row, duplicate))
+                .map(|r| &r.output);
+            let directory = output.map_or(self.organization.default_directory.as_str(), |o| {
+                &o.directory
+            });
+            let filename =
+                output.map_or(self.organization.default_filename.as_str(), |o| &o.filename);
+            let directory = render(directory, row, duplicate)
+                .split('/')
+                .map(|p| sanitize(p).to_lowercase())
+                .collect::<Vec<_>>()
+                .join("/");
+            let filename = render(filename, row, duplicate);
+            let filename = format!(
+                "{}.sample",
+                sanitize(filename.strip_suffix(".sample").expect("validated suffix"))
+            );
+            let directory =
+                if matches!(self.organization.duplicates, Duplicates::Separate) && !first {
+                    format!("duplicates/{directory}")
+                } else {
+                    directory
+                };
+            let mut path = format!("{directory}/{filename}");
+            if !paths.insert(path.to_lowercase()) {
+                path = format!(
+                    "{directory}/{}-{}.sample",
+                    filename.trim_end_matches(".sample"),
+                    row.occurrence_id
+                );
+                ensure!(
+                    paths.insert(path.to_lowercase()),
+                    "unresolvable occurrence collision"
+                );
+            }
+            ensure!(
+                !directories.contains(&path.to_lowercase()),
+                "view file conflicts with a directory"
+            );
+            let mut prefix = String::new();
+            for component in directory.split('/') {
+                if !prefix.is_empty() {
+                    prefix.push('/');
+                }
+                prefix.push_str(component);
+                ensure!(
+                    !paths.contains(&prefix.to_lowercase()),
+                    "view directory conflicts with a file or reserved layout.jsonl"
+                );
+                directories.insert(prefix.to_lowercase());
+            }
+            ensure!(path.len() <= 2048, "output path exceeds 2048 bytes");
+            result.push(Planned {
+                path,
+                sha256: row.sha256.clone(),
+                occurrence_id: row.occurrence_id.clone(),
+            });
+        }
+        Ok(result)
+    }
+}

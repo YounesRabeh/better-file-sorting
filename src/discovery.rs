@@ -1,0 +1,67 @@
+use anyhow::{Context, Result, ensure};
+use std::{
+    collections::BTreeSet,
+    fs::File,
+    io::Read,
+    path::{Component, Path, PathBuf},
+};
+use walkdir::WalkDir;
+
+/// Refuse symlinks in any existing component, including input ancestors.
+pub fn check_path(path: &Path) -> Result<()> {
+    let mut current = PathBuf::new();
+    for part in path.components() {
+        ensure!(
+            !matches!(part, Component::ParentDir),
+            "parent path components are forbidden"
+        );
+        current.push(part);
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) => ensure!(
+                !meta.file_type().is_symlink(),
+                "symlink path refused: {}",
+                current.display()
+            ),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
+}
+/// Discover ZIP files while excluding symlinks and the output repository.
+pub fn discover(inputs: &[PathBuf], recursive: bool, output: &Path) -> Result<Vec<PathBuf>> {
+    ensure!(!inputs.is_empty(), "provide at least one input path");
+    check_path(output)?;
+    let excluded = if output.exists() {
+        output.canonicalize()?
+    } else {
+        std::env::current_dir()?.join(output)
+    };
+    let mut paths = BTreeSet::new();
+    for input in inputs {
+        check_path(input)?;
+        ensure!(input.exists(), "input does not exist: {}", input.display());
+        for item in WalkDir::new(input)
+            .follow_links(false)
+            .max_depth(if recursive { usize::MAX } else { 1 })
+            .into_iter()
+            .filter_entry(|e| {
+                !e.path().starts_with(&excluded)
+                    && e.path()
+                        .canonicalize()
+                        .is_ok_and(|p| !p.starts_with(&excluded))
+            })
+        {
+            let item = item.context("archive discovery failed")?;
+            if !item.file_type().is_file() {
+                continue;
+            }
+            let mut signature = [0; 4];
+            let read = File::open(item.path())?.read(&mut signature)?;
+            if read == 4 && matches!(&signature, b"PK\x03\x04" | b"PK\x05\x06" | b"PK\x07\x08") {
+                paths.insert(item.path().canonicalize()?);
+            }
+        }
+    }
+    Ok(paths.into_iter().collect())
+}
