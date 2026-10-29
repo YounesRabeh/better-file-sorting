@@ -1,5 +1,5 @@
 #![cfg(unix)]
-use malware_organizer::{classifier::classify, config::SecurityMode, storage::Repository};
+use bfs::{classifier::classify, config::SecurityMode, storage::Repository};
 use std::{
     io::Write,
     os::unix::fs::{MetadataExt, PermissionsExt},
@@ -82,6 +82,6 @@ fn statistics_include_objects_left_before_manifest_commit() {
     let mut file = tempfile::NamedTempFile::new_in(repo.staging()).unwrap();
     file.write_all(b"abc").unwrap();
     repo.commit(file, &"a".repeat(64), 3).unwrap();
-    let summary = malware_organizer::report::summary(&repo, &[]).unwrap();
+    let summary = bfs::report::summary(&repo, &[]).unwrap();
     assert_eq!(summary.stored_bytes, 3);
 }

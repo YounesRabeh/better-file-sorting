@@ -1,4 +1,4 @@
-use malware_organizer::{
+use bfs::{
     config::{Config, Security, SecurityMode},
     metadata, organizer, pipeline,
     rules::Rules,
@@ -11,7 +11,7 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("storage benchmarks require the Unix permission backend");
     }
     let temp = tempfile::tempdir()?;
-    let quick = std::env::var_os("MO_BENCH_QUICK").is_some();
+    let quick = std::env::var_os("BFS_BENCH_QUICK").is_some();
     for (scenario, archives, entries, bytes, random, duplicates) in [
         (
             "small",

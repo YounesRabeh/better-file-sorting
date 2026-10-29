@@ -13,7 +13,7 @@ fn archive(path: &std::path::Path) {
 fn inspect_detects_content_without_extracting() {
     let dir = tempfile::tempdir().unwrap();
     archive(&dir.path().join("not-a-zip.bin"));
-    let out = Command::new(env!("CARGO_BIN_EXE_malware-organizer"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bfs"))
         .arg("inspect")
         .arg(dir.path())
         .output()
@@ -34,7 +34,7 @@ fn malformed_zip_is_reported() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("bad.zip");
     std::fs::write(&path, b"PK\x03\x04garbage").unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_malware-organizer"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bfs"))
         .arg("inspect")
         .arg(path)
         .output()
@@ -47,7 +47,7 @@ fn nonrecursive_skips_nested_archives() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("nested")).unwrap();
     archive(&dir.path().join("nested/a.zip"));
-    let out = Command::new(env!("CARGO_BIN_EXE_malware-organizer"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bfs"))
         .args(["inspect", "--recursive", "false"])
         .arg(dir.path())
         .output()
@@ -66,7 +66,7 @@ fn discovery_skips_symlinks() {
     let outside = tempfile::tempdir().unwrap();
     archive(&outside.path().join("a.zip"));
     std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_malware-organizer"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bfs"))
         .arg("inspect")
         .arg(dir.path())
         .output()

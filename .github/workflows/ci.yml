@@ -8,10 +8,7 @@ permissions:
   contents: read
 jobs:
   check:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -21,7 +18,6 @@ jobs:
         with:
           tool: nextest
       - name: Resolve Unix temporary directory ancestors
-        if: runner.os != 'Windows'
         shell: bash
         run: echo "TMPDIR=$(cd "${TMPDIR:-/tmp}" && pwd -P)" >> "$GITHUB_ENV"
       - run: cargo fmt --all -- --check

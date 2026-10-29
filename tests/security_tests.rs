@@ -1,6 +1,6 @@
 #![cfg(unix)]
 mod common;
-use malware_organizer::{config::SecurityMode, storage::Repository};
+use bfs::{config::SecurityMode, storage::Repository};
 use std::os::unix::fs::PermissionsExt;
 #[test]
 /// Ensure output symlinks and weak password files fail closed.
@@ -88,7 +88,7 @@ fn forced_stop_leaves_no_readable_payload_and_next_ingest_recovers() {
     }
     zip.finish().unwrap();
     let output = dir.path().join("repo");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_malware-organizer"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_bfs"))
         .arg("ingest")
         .arg(&input)
         .arg("--output")

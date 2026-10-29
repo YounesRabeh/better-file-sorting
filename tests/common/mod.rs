@@ -17,7 +17,7 @@ pub fn archive(path: &Path, entries: &[(&str, &[u8])]) {
 }
 /// Run the compiled CLI with native argument values.
 pub fn run(args: &[&std::ffi::OsStr]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_malware-organizer"))
+    Command::new(env!("CARGO_BIN_EXE_bfs"))
         .args(args)
         .output()
         .unwrap()

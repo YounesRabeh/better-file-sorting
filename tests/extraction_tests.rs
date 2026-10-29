@@ -1,4 +1,4 @@
-use malware_organizer::{config::Limits, extraction::extract};
+use bfs::{config::Limits, extraction::extract};
 use std::{fs::File, io::Write, sync::atomic::AtomicBool};
 use zip::{ZipWriter, write::SimpleFileOptions};
 /// Build an encrypted or plain single-entry ZIP fixture.

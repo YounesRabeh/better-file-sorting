@@ -4,7 +4,7 @@ fn ingest(config: &str, args: &[&str]) -> std::process::Output {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(&path, config).unwrap();
-    Command::new(env!("CARGO_BIN_EXE_malware-organizer"))
+    Command::new(env!("CARGO_BIN_EXE_bfs"))
         .args(["ingest", "--config"])
         .arg(path)
         .args(args)

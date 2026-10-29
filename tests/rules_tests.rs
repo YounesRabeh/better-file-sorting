@@ -1,4 +1,4 @@
-use malware_organizer::{metadata::Occurrence, rules::Rules};
+use bfs::{metadata::Occurrence, rules::Rules};
 /// Build a deterministic occurrence fixture for rules tests.
 fn row(name: &str, id: char, hash: char) -> Occurrence {
     Occurrence {

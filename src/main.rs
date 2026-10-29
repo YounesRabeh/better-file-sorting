@@ -1,24 +1,21 @@
 use anyhow::Result;
-use clap::Parser;
-use malware_organizer::{
+use bfs::{
     cli::{Cli, Command},
     config::Config,
 };
+use clap::Parser;
 /// Dispatch one parsed CLI command and return its process exit code.
 fn run(cli: Cli) -> Result<u8> {
     match cli.command {
         Command::Ingest(args) => {
             let config = Config::for_ingest(&args)?;
             if args.dry_run {
-                malware_organizer::rules::Rules::load(config.rules.as_deref())?;
-                let paths = malware_organizer::discovery::discover(
-                    &config.inputs,
-                    config.recursive,
-                    &config.output,
-                )?;
+                bfs::rules::Rules::load(config.rules.as_deref())?;
+                let paths =
+                    bfs::discovery::discover(&config.inputs, config.recursive, &config.output)?;
                 let inspections = paths
                     .iter()
-                    .map(|p| malware_organizer::archive::inspect(p, &config.limits))
+                    .map(|p| bfs::archive::inspect(p, &config.limits))
                     .collect::<Result<Vec<_>>>()?;
                 println!("{}", serde_json::to_string_pretty(&inspections)?);
                 return Ok(0);
@@ -26,7 +23,7 @@ fn run(cli: Cli) -> Result<u8> {
             let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let signal = cancelled.clone();
             ctrlc::set_handler(move || signal.store(true, std::sync::atomic::Ordering::Relaxed))?;
-            let report = malware_organizer::pipeline::ingest(&config, &cancelled)?;
+            let report = bfs::pipeline::ingest(&config, &cancelled)?;
             eprintln!(
                 "Accepted {} samples; {} failures; {} unique objects ({:?})",
                 report.accepted,
@@ -50,26 +47,21 @@ fn run(cli: Cli) -> Result<u8> {
                 config.recursive = value;
             }
             config.validate()?;
-            let archives = malware_organizer::discovery::discover(
-                &config.inputs,
-                config.recursive,
-                &config.output,
-            )?;
+            let archives =
+                bfs::discovery::discover(&config.inputs, config.recursive, &config.output)?;
             let inspections = archives
                 .iter()
-                .map(|path| malware_organizer::archive::inspect(path, &config.limits))
+                .map(|path| bfs::archive::inspect(path, &config.limits))
                 .collect::<Result<Vec<_>>>()?;
             println!("{}", serde_json::to_string_pretty(&inspections)?);
             Ok(0)
         }
         Command::Stats { repository } => {
-            let repo = malware_organizer::storage::Repository::existing(&repository)?;
-            let records = malware_organizer::metadata::load(repo.root())?;
+            let repo = bfs::storage::Repository::existing(&repository)?;
+            let records = bfs::metadata::load(repo.root())?;
             println!(
                 "{}",
-                serde_json::to_string_pretty(&malware_organizer::report::summary(
-                    &repo, &records
-                )?)?
+                serde_json::to_string_pretty(&bfs::report::summary(&repo, &records)?)?
             );
             Ok(0)
         }
@@ -78,17 +70,14 @@ fn run(cli: Cli) -> Result<u8> {
             rules,
             dry_run,
         } => {
-            let rules = malware_organizer::rules::Rules::load(Some(&rules))?;
-            let repo = malware_organizer::storage::Repository::existing(&repository)?;
-            let records = malware_organizer::metadata::load(repo.root())?;
+            let rules = bfs::rules::Rules::load(Some(&rules))?;
+            let repo = bfs::storage::Repository::existing(&repository)?;
+            let records = bfs::metadata::load(repo.root())?;
             let plan = rules.plan(&records)?;
             if dry_run {
                 println!("{}", serde_json::to_string_pretty(&plan)?);
             } else {
-                println!(
-                    "{}",
-                    malware_organizer::organizer::organize(&repo, &rules, &plan)?
-                );
+                println!("{}", bfs::organizer::organize(&repo, &rules, &plan)?);
             }
             Ok(0)
         }

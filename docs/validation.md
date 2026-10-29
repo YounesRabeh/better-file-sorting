@@ -1,6 +1,8 @@
 # Implementation and validation record
 
-[< Back to malware-organizer](../README.md) • [Documentation Hub](README.md)
+[< Back to Better File Sorting](../README.md) • [Documentation Hub](README.md)
+
+Current tooling is named `bfs`; CI and distributed releases target Linux only. Cross-platform checks below describe historical validation, not current platform support.
 
 Validated on 2026-10-29 using Rust 1.99.0, Linux x86-64, as uid 1000. This is a pre-release implementation, not a v1.0 release certification.
 

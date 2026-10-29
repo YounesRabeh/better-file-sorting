@@ -3,7 +3,7 @@
 <div align="center">
 
   <p>
-    <img src="https://img.shields.io/badge/Storage-Unix-f4c542?style=for-the-badge&amp;logo=linux&amp;logoColor=white" alt="Unix storage">
+    <img src="https://img.shields.io/badge/Platform-Linux-f4c542?style=for-the-badge&amp;logo=linux&amp;logoColor=white" alt="Linux">
     <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-2024-000000?style=for-the-badge&amp;logo=rust&amp;logoColor=white" alt="Rust 2024"></a>
     <a href="https://github.com/younidev-org/better-file-sorting/releases"><img src="https://img.shields.io/badge/Release-View_Releases-2ea44f?style=for-the-badge" alt="View releases"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSD--3--Clause-2ea44f?style=for-the-badge" alt="BSD 3-Clause License"></a>
@@ -41,7 +41,7 @@ flowchart LR
 
 ## Quick start
 
-Requires stable Rust with Rust 2024 support; storage operations require Unix-like systems.
+Requires Linux and stable Rust with Rust 2024 support. The CLI executable is `bfs`.
 
 ### 1. Build and configure
 
@@ -54,16 +54,16 @@ cp rules.example.toml rules.toml
 ### 2. Inspect and ingest
 
 ```sh
-target/release/malware-organizer inspect ./downloads
-target/release/malware-organizer ingest ./downloads \
+target/release/bfs inspect ./downloads
+target/release/bfs ingest ./downloads \
   --output ./repository --config ./config.toml --rules ./rules.toml
-target/release/malware-organizer stats ./repository
+target/release/bfs stats ./repository
 ```
 
 ### 3. Preview a new layout
 
 ```sh
-target/release/malware-organizer reorganize ./repository --rules ./rules.toml --dry-run
+target/release/bfs reorganize ./repository --rules ./rules.toml --dry-run
 ```
 
 ## Development
