@@ -12,4 +12,4 @@ Choose a reference by task:
 | Inspect the benchmark output | [Benchmark results](benchmark-tmpfs.jsonl) |
 | Compare the partial disk benchmark | [Partial Btrfs benchmark](benchmark-btrfs-partial.jsonl) |
 
-Configuration templates live at the repository root: [config.example.toml](../config.example.toml) and [rules.example.toml](../rules.example.toml).
+Configuration templates live at the repository root: [config.example.toml](../config.example.toml), [sample rules](../rules.example.toml), and [regular-file rules](../rules.files.example.toml).

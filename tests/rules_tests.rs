@@ -2,6 +2,7 @@ use bfs::{metadata::Occurrence, rules::Rules};
 /// Build a deterministic occurrence fixture for rules tests.
 fn row(name: &str, id: char, hash: char) -> Occurrence {
     Occurrence {
+        input_mode: bfs::config::InputMode::Archives,
         occurrence_id: id.to_string().repeat(64),
         sha256: hash.to_string().repeat(64),
         size: 3,
@@ -126,4 +127,35 @@ fn match_fields_ranges_and_unicode_normalization_are_consistent() {
     assert_eq!(names.len(), 3);
     assert!(plan.iter().all(|e| !e.path.contains('\u{301}')));
     assert!(Rules::parse("[[rules]]\nname = 'bad'\n[rules.match]\nmin_size = 4\nmax_size = 3\n[rules.output]\ndirectory = 'x'\nfilename = 'x.sample'").is_err());
+}
+
+#[test]
+fn regular_names_keep_long_extensions_and_legacy_records_stay_samples() {
+    let rules = Rules::parse("[organization]\nfilename_policy = 'regular'\nduplicates = 'all'\ndefault_filename = '{original_name}'").unwrap();
+    let mut a = row(&format!("{}.txt", "é".repeat(100)), 'a', 'a');
+    a.input_mode = bfs::config::InputMode::Files;
+    let mut b = a.clone();
+    b.occurrence_id = "b".repeat(64);
+    let plan = rules.plan(&[a.clone(), b]).unwrap();
+    assert!(plan.iter().all(|p| p.path.ends_with(".txt")
+        && std::path::Path::new(&p.path).file_name().unwrap().len() <= 255));
+    assert_ne!(plan[0].path, plan[1].path);
+    let mut legacy = serde_json::to_value(a).unwrap();
+    legacy.as_object_mut().unwrap().remove("input_mode");
+    let legacy: Occurrence = serde_json::from_value(legacy).unwrap();
+    assert_eq!(legacy.input_mode, bfs::config::InputMode::Archives);
+    assert!(rules.plan(std::slice::from_ref(&legacy)).is_err());
+    assert!(
+        Rules::default().plan(&[legacy]).unwrap()[0]
+            .path
+            .ends_with(".sample")
+    );
+    for filename in ["../escape", "/escape", "{invalid}"] {
+        assert!(
+            Rules::parse(&format!(
+                "[organization]\nfilename_policy = 'regular'\ndefault_filename = '{filename}'"
+            ))
+            .is_err()
+        );
+    }
 }

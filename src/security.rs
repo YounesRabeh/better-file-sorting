@@ -111,6 +111,7 @@ pub fn passwords(path: Option<&Path>) -> Result<Vec<String>> {
 /// Create a private temporary directory beneath a repository staging path.
 pub fn private_tempdir(parent: &Path, prefix: &str) -> Result<tempfile::TempDir> {
     supported()?;
+    check_path(parent)?;
     let mut builder = tempfile::Builder::new();
     builder.prefix(prefix);
     #[cfg(unix)]

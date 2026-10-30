@@ -1,6 +1,7 @@
 version = 1
 
 [organization]
+filename_policy = "samples" # .sample required; use rules.files.example.toml for regular files
 duplicates = "first_only"
 view_mode = "hardlink" # or "manifest": no payload links
 default_directory = "{file_type}"

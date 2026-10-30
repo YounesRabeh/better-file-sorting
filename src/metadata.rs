@@ -11,6 +11,9 @@ use std::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Occurrence {
+    /// Old manifests conservatively retain archive-sample safeguards.
+    #[serde(default)]
+    pub input_mode: crate::config::InputMode,
     pub occurrence_id: String,
     pub sha256: String,
     pub size: u64,

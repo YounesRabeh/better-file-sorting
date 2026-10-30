@@ -9,23 +9,14 @@ fn run(cli: Cli) -> Result<u8> {
     match cli.command {
         Command::Ingest(args) => {
             let config = Config::for_ingest(&args)?;
-            if args.dry_run {
-                bfs::rules::Rules::load(config.rules.as_deref())?;
-                let paths = bfs::discovery::for_ingest(&config)?;
-                if config.input_mode == bfs::config::InputMode::Files {
-                    println!("{}", serde_json::to_string_pretty(&paths)?);
-                    return Ok(0);
-                }
-                let inspections = paths
-                    .iter()
-                    .map(|p| bfs::archive::inspect(p, &config.limits))
-                    .collect::<Result<Vec<_>>>()?;
-                println!("{}", serde_json::to_string_pretty(&inspections)?);
-                return Ok(0);
-            }
             let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let signal = cancelled.clone();
             ctrlc::set_handler(move || signal.store(true, std::sync::atomic::Ordering::Relaxed))?;
+            if args.dry_run {
+                let preview = bfs::pipeline::preview(&config, &cancelled)?;
+                println!("{}", serde_json::to_string_pretty(&preview)?);
+                return Ok(0);
+            }
             let report = bfs::pipeline::ingest(&config, &cancelled)?;
             eprintln!(
                 "Accepted {} samples; {} failures; {} unique objects ({:?})",
@@ -34,6 +25,12 @@ fn run(cli: Cli) -> Result<u8> {
                 report.summary.unique_samples,
                 report.summary.security_mode
             );
+            if let Some(zip) = &report.zip {
+                eprintln!(
+                    "ZIP: {} payload bytes -> {} output bytes; {} bytes saved; {:.3}s total",
+                    zip.payload_bytes, zip.output_bytes, zip.saved_bytes, report.elapsed_seconds
+                );
+            }
             println!("{}", serde_json::to_string_pretty(&report)?);
             Ok(if report.failures > 0 || report.interrupted {
                 if report.accepted > 0 { 2 } else { 1 }

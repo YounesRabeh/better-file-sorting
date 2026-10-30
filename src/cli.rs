@@ -39,6 +39,9 @@ pub struct Ingest {
     /// Protected file containing exactly one password for AES-256 ZIP output
     #[arg(long)]
     pub output_password_file: Option<PathBuf>,
+    /// Existing directory for private ZIP and preview temporary storage
+    #[arg(long)]
+    pub staging_dir: Option<PathBuf>,
     pub inputs: Vec<PathBuf>,
     #[arg(long)]
     pub config: Option<PathBuf>,
@@ -54,6 +57,7 @@ pub struct Ingest {
     pub security_mode: Option<SecurityMode>,
     #[arg(long, action = clap::ArgAction::Set)]
     pub recursive: Option<bool>,
+    /// Hash and classify inputs to preview the final layout without publishing
     #[arg(long)]
     pub dry_run: bool,
 }

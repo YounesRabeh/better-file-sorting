@@ -65,6 +65,7 @@ pub struct Config {
     pub input_mode: InputMode,
     pub zip: bool,
     pub output_password_file: Option<PathBuf>,
+    pub staging_dir: Option<PathBuf>,
     pub inputs: Vec<PathBuf>,
     pub output: PathBuf,
     pub recursive: bool,
@@ -81,6 +82,7 @@ impl Default for Config {
             input_mode: InputMode::Archives,
             zip: false,
             output_password_file: None,
+            staging_dir: None,
             inputs: vec![],
             output: "repository".into(),
             recursive: true,
@@ -117,6 +119,9 @@ impl Config {
         }
         if let Some(path) = &args.output_password_file {
             c.output_password_file = Some(path.clone());
+        }
+        if let Some(path) = &args.staging_dir {
+            c.staging_dir = Some(path.clone());
         }
         if !args.inputs.is_empty() {
             c.inputs.clone_from(&args.inputs);
@@ -170,6 +175,12 @@ impl Config {
         }
         if self.output.as_os_str().is_empty() {
             return Err(error("output must not be empty").into());
+        }
+        if let Some(path) = &self.staging_dir {
+            crate::discovery::check_path(path)?;
+            if !path.is_dir() {
+                return Err(error("staging_dir must be an existing directory").into());
+            }
         }
         Ok(())
     }

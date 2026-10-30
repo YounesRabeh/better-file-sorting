@@ -26,14 +26,15 @@ Examples use `bfs` on your `PATH`. After a local build, use
 | `--config <FILE>` | Load runtime settings from TOML. Explicit CLI settings override file settings. | Built-in settings when omitted. |
 | `--input-mode <MODE>` | Choose archive extraction or ordinary-file sorting. | `archives` (default), `files`. |
 | `--output <PATH>` | Repository directory, or destination ZIP path when ZIP output is enabled. | `repository`; use an explicit ZIP filename with `--zip`. |
-| `--rules <FILE>` | Load the central sorting policy: ordered matchers, templates and duplicate handling. | Built-in rules: first occurrence per content hash, grouped by file type, named `{sha256}.sample`. |
+| `--rules <FILE>` | Load the central sorting policy: filename policy, ordered matchers, templates and duplicate handling. | Built-in rules: first occurrence per content hash, grouped by file type, named `{sha256}.sample`. Use `rules.files.example.toml` to retain ordinary filenames. |
 | `--zip` | Enable ZIP-only output. Refuses existing destinations and failed or interrupted runs. | Disabled. Can also be enabled with `zip = true` in config. |
 | `--output-password-file <FILE>` | Encrypt output contents with AES-256. The file must have `0600` permissions and contain exactly one nonempty password line. | No output encryption. Requires ZIP output. |
+| `--staging-dir <DIR>` | Select an existing directory for private ZIP/preview working storage. Symlink paths are refused; a private child is created and cleaned up. Repository ingestion keeps its internal staging location. | ZIP: output parent. Preview: system temporary directory. CLI overrides `staging_dir` in config. |
 | `--password-file <FILE>` | Read candidate passwords for encrypted input archives, one per nonempty line, from a `0600` file. Independent of the output password. | No candidates. |
 | `--workers <N>` | Set parallel ingest workers. | Available CPU parallelism capped at 8; accepts `1`–`256`. |
 | `--security-mode <MODE>` | Set repository payload permissions. Existing repository modes cannot be changed automatically. ZIP output always uses disposable private, standard-mode storage. | `sealed` (default, `0000` payloads), `standard` (`0600` payloads). |
 | `--recursive <BOOL>` | Include nested folders or only immediate children. Pass the boolean explicitly. | `true` (default), `false`. |
-| `--dry-run` | Write no output: inspect archive metadata in archive mode, or list discovered paths in file mode. | Disabled. This does not perform a full ingest or guarantee that a real run will succeed. |
+| `--dry-run` | Hash/classify inputs in sealed temporary storage and print final destinations, source mapping and duplicate counts as JSON. Include existing repository metadata without publishing changes. | Disabled. Reads full contents; archive previews need input passwords. Files can change between preview and execution. Use `inspect` for metadata-only archive inspection. |
 | `--help` / `-h` | Show ingest help. | — |
 
 ## Other command options
@@ -54,7 +55,7 @@ Examples use `bfs` on your `PATH`. After a local build, use
 Create a local password file with `0600` permissions, then run:
 
 ```sh
-bfs ingest ./documents --input-mode files --rules ./rules.toml \
+bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml \
   --zip --output ./private.zip --output-password-file ./output-password.txt
 ```
 
@@ -64,13 +65,33 @@ contents are encrypted; extraction requires an AES-compatible reader.
 
 Policies are configured in [rules.example.toml](../rules.example.toml); runtime
 settings and size/count limits are in [config.example.toml](../config.example.toml).
-Output filenames must end in `.sample`. Use `{original_name}.sample` in a
-filename template to retain readable original names.
+The default `organization.filename_policy = "samples"` requires `.sample`
+filenames. For regular files, use [rules.files.example.toml](../rules.files.example.toml):
+`filename_policy = "regular"` with `default_filename = "{original_name}"`.
+Names are sanitized and collision identifiers preserve extensions. Archive
+inputs and archive-derived records refuse the regular policy, including legacy
+records without input-mode provenance.
 
 ZIP mode needs temporary disk space for uncompressed, deduplicated inputs plus
 the ZIP. Normal completion and handled errors remove staging; an uncatchable
-kill or crash may leave private plaintext under `.bfs-zip-*` beside the output.
+kill or crash may leave private plaintext under `.bfs-zip-*` in the selected
+staging directory (by default, beside the output).
 See the [ZIP usage notes](../README.md#sort-regular-folders-and-zip-the-result).
+
+## Preview and ZIP reports
+
+| Field | Meaning |
+| --- | --- |
+| Preview `plan` | Final paths, content hashes, occurrence IDs, source paths and original entry names after duplicate/collision handling. |
+| Preview `summary` | Combined occurrences, unique files and duplicate occurrences, including existing repository metadata. |
+| Report `first_failure` | First failing source, optional entry index and cause; omitted on success. ZIP failures print this detail before cleaning temporary reports. |
+| Report `zip.payload_bytes` | Total bytes of policy-selected payload entries, counting repeated entries if duplicate policy retains them. |
+| Report `zip.output_bytes` | Actual published ZIP size, including layout metadata and ZIP overhead. |
+| Report `zip.saved_bytes` | Payload bytes minus final ZIP bytes. Negative means growth. |
+| Report `zip.savings_percent` | Percentage saved relative to payload bytes; `null` when payload bytes are zero. |
+| Report `zip.ingest_seconds` | Time spent ingesting and organizing before ZIP creation. |
+| Report `elapsed_seconds` | Full ZIP run, including discovery, compression, publication and cleanup. |
+| Report `summary` | Existing ingest repository statistics; these do not measure the final ZIP. |
 
 ## Exit codes
 

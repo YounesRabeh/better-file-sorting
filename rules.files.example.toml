@@ -1,0 +1,17 @@
+version = 1
+
+# Use with --input-mode files; archive-derived records require the samples policy.
+[organization]
+filename_policy = "regular"
+duplicates = "first_only"
+view_mode = "hardlink"
+default_directory = "{file_type}"
+default_filename = "{original_name}"
+
+[[rules]]
+name = "PDF documents"
+[rules.match]
+original_extension = "pdf"
+[rules.output]
+directory = "documents/pdf"
+filename = "{original_name}"

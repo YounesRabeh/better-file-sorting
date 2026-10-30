@@ -42,9 +42,17 @@ pub enum ViewMode {
     Hardlink,
     Manifest,
 }
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilenamePolicy {
+    #[default]
+    Samples,
+    Regular,
+}
 #[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Organization {
+    pub filename_policy: FilenamePolicy,
     pub duplicates: Duplicates,
     pub view_mode: ViewMode,
     pub default_directory: String,
@@ -54,6 +62,7 @@ impl Default for Organization {
     /// Return default duplicate handling and safe sample templates.
     fn default() -> Self {
         Self {
+            filename_policy: FilenamePolicy::Samples,
             duplicates: Duplicates::FirstOnly,
             view_mode: ViewMode::Hardlink,
             default_directory: "{file_type}".into(),
@@ -117,7 +126,7 @@ impl Default for Rules {
     }
 }
 /// Validate a directory or filename template and its placeholders.
-fn template(text: &str, filename: bool) -> Result<()> {
+fn template(text: &str, filename: bool, policy: FilenamePolicy) -> Result<()> {
     ensure!(
         !text.is_empty() && text.len() <= 1024,
         "empty or overlong template"
@@ -140,8 +149,8 @@ fn template(text: &str, filename: bool) -> Result<()> {
     );
     if filename {
         ensure!(
-            !text.contains('/') && text.ends_with(".sample"),
-            "filename must be one component ending in .sample"
+            !text.contains('/') && (policy == FilenamePolicy::Regular || text.ends_with(".sample")),
+            "filename must be one component ending in .sample under the samples policy"
         );
     }
     let mut rest = text;
@@ -195,8 +204,25 @@ pub fn sanitize(value: &str) -> String {
     }
     result
 }
+
+/// Leave room for collision identifiers while retaining an ordinary file's extension.
+fn regular_filename(value: &str) -> String {
+    let extension = Path::new(value).extension().and_then(|s| s.to_str());
+    match extension.filter(|s| !s.is_empty()) {
+        Some(extension) => {
+            let stem = &value[..value.len() - extension.len() - 1];
+            let extension = sanitize(extension);
+            let mut stem = sanitize(stem);
+            while stem.len() + extension.len() + 1 > 180 {
+                stem.pop();
+            }
+            format!("{stem}.{extension}")
+        }
+        None => sanitize(value),
+    }
+}
 /// Render a validated template using one occurrence's metadata.
-fn render(text: &str, row: &Occurrence, duplicate: bool) -> String {
+fn render(text: &str, row: &Occurrence, duplicate: bool, policy: FilenamePolicy) -> String {
     let mut result = String::new();
     let mut rest = text;
     while let Some(start) = rest.find('{') {
@@ -216,7 +242,11 @@ fn render(text: &str, row: &Occurrence, duplicate: bool) -> String {
             "occurrence_id" => row.occurrence_id.clone(),
             _ => unreachable!("validated template"),
         };
-        result.push_str(&sanitize(&value));
+        if policy == FilenamePolicy::Regular && &rest[start + 1..end] == "original_name" {
+            result.push_str(&regular_filename(&value));
+        } else {
+            result.push_str(&sanitize(&value));
+        }
         rest = &rest[end + 1..];
     }
     result.push_str(rest);
@@ -241,12 +271,13 @@ impl Rules {
     /// Validate rule version, templates, matchers, and output constraints.
     pub fn validate(&self) -> Result<()> {
         ensure!(self.version == 1, "unsupported rules version");
-        template(&self.organization.default_directory, false)?;
-        template(&self.organization.default_filename, true)?;
+        let policy = self.organization.filename_policy;
+        template(&self.organization.default_directory, false, policy)?;
+        template(&self.organization.default_filename, true, policy)?;
         for rule in &self.rules {
             ensure!(!rule.name.trim().is_empty(), "rule name must not be empty");
-            template(&rule.output.directory, false)?;
-            template(&rule.output.filename, true)?;
+            template(&rule.output.directory, false, policy)?;
+            template(&rule.output.filename, true, policy)?;
             ensure!(
                 rule.matcher.min_size.unwrap_or(0) <= rule.matcher.max_size.unwrap_or(u64::MAX),
                 "invalid size range"
@@ -266,6 +297,13 @@ impl Rules {
     /// Build a deterministic, collision-safe logical view plan.
     pub fn plan(&self, records: &[Occurrence]) -> Result<Vec<Planned>> {
         self.validate()?;
+        ensure!(
+            self.organization.filename_policy == FilenamePolicy::Samples
+                || records
+                    .iter()
+                    .all(|r| r.input_mode == crate::config::InputMode::Files),
+            "regular filename policy is forbidden for archive-derived records"
+        );
         let mut sorted: Vec<_> = records.iter().collect();
         sorted.sort_by(|a, b| {
             (&a.source_path, a.entry_index, &a.occurrence_id).cmp(&(
@@ -301,16 +339,20 @@ impl Rules {
             });
             let filename =
                 output.map_or(self.organization.default_filename.as_str(), |o| &o.filename);
-            let directory = render(directory, row, duplicate)
+            let directory = render(directory, row, duplicate, self.organization.filename_policy)
                 .split('/')
                 .map(|p| sanitize(p).to_lowercase())
                 .collect::<Vec<_>>()
                 .join("/");
-            let filename = render(filename, row, duplicate);
-            let filename = format!(
-                "{}.sample",
-                sanitize(filename.strip_suffix(".sample").expect("validated suffix"))
-            );
+            let filename = render(filename, row, duplicate, self.organization.filename_policy);
+            let filename = if self.organization.filename_policy == FilenamePolicy::Samples {
+                format!(
+                    "{}.sample",
+                    sanitize(filename.strip_suffix(".sample").expect("validated suffix"))
+                )
+            } else {
+                regular_filename(&filename)
+            };
             let directory =
                 if matches!(self.organization.duplicates, Duplicates::Separate) && !first {
                     format!("duplicates/{directory}")
@@ -319,11 +361,17 @@ impl Rules {
                 };
             let mut path = format!("{directory}/{filename}");
             if !paths.insert(path.to_lowercase()) {
-                path = format!(
-                    "{directory}/{}-{}.sample",
-                    filename.trim_end_matches(".sample"),
-                    row.occurrence_id
-                );
+                let name = Path::new(&filename);
+                let (stem, suffix) = match name.extension().and_then(|s| s.to_str()) {
+                    Some(extension) => (
+                        name.file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(&filename),
+                        format!(".{extension}"),
+                    ),
+                    None => (filename.as_str(), String::new()),
+                };
+                path = format!("{directory}/{stem}-{}{suffix}", row.occurrence_id);
                 ensure!(
                     paths.insert(path.to_lowercase()),
                     "unresolvable occurrence collision"

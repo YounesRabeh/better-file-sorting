@@ -14,4 +14,5 @@ fn example_configuration_and_rules_are_valid() {
         toml::from_str(include_str!("../config.example.toml")).unwrap();
     config.validate().unwrap();
     bfs::rules::Rules::parse(include_str!("../rules.example.toml")).unwrap();
+    bfs::rules::Rules::parse(include_str!("../rules.files.example.toml")).unwrap();
 }
