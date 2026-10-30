@@ -121,3 +121,22 @@ pub fn private_tempdir(parent: &Path, prefix: &str) -> Result<tempfile::TempDir>
     }
     Ok(builder.tempdir_in(parent)?)
 }
+
+/// Publish a complete directory without replacing any existing destination.
+pub fn publish_directory(source: &Path, destination: &Path) -> Result<()> {
+    check_path(source)?;
+    check_path(destination)?;
+    #[cfg(target_os = "linux")]
+    {
+        rustix::fs::renameat_with(
+            rustix::fs::CWD,
+            source,
+            rustix::fs::CWD,
+            destination,
+            rustix::fs::RenameFlags::NOREPLACE,
+        )?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    bail!("atomic no-replace directory publication is supported on Linux only")
+}

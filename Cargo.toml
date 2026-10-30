@@ -1,6 +1,6 @@
 [package]
 name = "bfs"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "BSD-3-Clause"
 description = "Metadata-driven, permission-restricted ZIP sample organizer"
@@ -24,6 +24,9 @@ rayon = "1"
 chrono = "0.4"
 unicode-normalization = "0.1"
 ctrlc = "3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1", features = ["fs"] }
 
 
 [[bench]]

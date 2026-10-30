@@ -165,13 +165,24 @@ excluded from discovered inputs.
 | Task | Command |
 | --- | --- |
 | Sort ordinary files into a ZIP | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip --output ./sorted.zip` |
+| ZIP selected sorted directories together | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip-dir documents/pdf --zip-dir text --output ./selected.zip` |
+| Create one ZIP per top-level sorted directory | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip-each-dir --output ./exports` |
+| Create separate ZIPs for selected directories | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip-dir documents/pdf --zip-dir text --zip-each-dir --output ./exports` |
 | Encrypt the output ZIP with AES-256 | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip --output ./private.zip --output-password-file ./output-password.txt` |
 | Decrypt archive inputs and export their sorted contents | `bfs ingest ./downloads --password-file ./input-passwords.txt --rules ./rules.example.toml --zip --output ./sorted.zip` |
 | Select temporary storage for ZIP output | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip --output ./sorted.zip --staging-dir /existing/scratch` |
 
 </details>
 
-ZIP reports include final output size, selected payload size, signed savings,
+`--zip-dir` and `--zip-each-dir` enable ZIP output automatically. Selections refer
+to sorted destination directories, include descendants, and support the same
+optional password. Separate mode uses a new output directory and retains the
+sorted hierarchy: `documents/pdf` becomes `exports/documents/pdf.zip`. Each ZIP
+contains its own layout index; unselected files are omitted from the export.
+Use `--dry-run` to preview archive destinations. See the
+[selection reference](docs/commands.md#selecting-sorted-directories) for details.
+
+ZIP reports include per-archive sizes, aggregate output size, selected payload size, signed savings,
 and total elapsed time. Negative savings mean the ZIP grew. ZIP filenames remain
 visible when contents are encrypted; extraction requires an AES-compatible reader.
 Archive previews read and decompress entries and therefore need input passwords.

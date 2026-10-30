@@ -29,11 +29,18 @@ pub struct Failure {
 }
 #[derive(Serialize)]
 pub struct ZipSummary {
+    pub archives: Vec<ZipArchiveSummary>,
     pub payload_bytes: u64,
     pub output_bytes: u64,
     pub saved_bytes: i128,
     pub savings_percent: Option<f64>,
     pub ingest_seconds: f64,
+}
+#[derive(Serialize)]
+pub struct ZipArchiveSummary {
+    pub output: std::path::PathBuf,
+    pub payload_bytes: u64,
+    pub output_bytes: u64,
 }
 #[derive(Serialize)]
 pub struct RunReport {
@@ -99,6 +106,8 @@ fn ingest_zip(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> Result<
     let mut staging = config.clone();
     staging.output = temporary.path().join("repository");
     staging.zip = false;
+    staging.zip_dirs.clear();
+    staging.zip_each_dir = false;
     staging.output_password_file = None;
     // Only this new disposable repository is readable; existing sealed storage stays sealed.
     // shortcut: private plaintext staging can survive SIGKILL; use encrypted scratch storage for crash confidentiality.
@@ -110,15 +119,37 @@ fn ingest_zip(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> Result<
     let repo = Repository::existing(&staging.output)?;
     let records = metadata::load(repo.root())?;
     let plan = rules.plan(&records)?;
+    let exports = archive::plan_exports(&plan, config)?;
     let sizes: BTreeMap<_, _> = records.iter().map(|r| (&r.occurrence_id, r.size)).collect();
-    let payload_bytes = plan.iter().try_fold(0u64, |total, entry| {
-        total
-            .checked_add(sizes[&entry.occurrence_id])
-            .context("ZIP payload size overflow")
+    let payload_bytes =
+        exports
+            .iter()
+            .flat_map(|e| &e.entries)
+            .try_fold(0u64, |total, entry| {
+                total
+                    .checked_add(sizes[&entry.occurrence_id])
+                    .context("ZIP payload size overflow")
+            })?;
+    archive::publish_exports(&repo, &exports, config, password.as_deref(), cancelled)?;
+    let archives = exports
+        .iter()
+        .map(|export| {
+            Ok(ZipArchiveSummary {
+                output: export.output.clone(),
+                payload_bytes: export.entries.iter().try_fold(0u64, |n, e| {
+                    n.checked_add(sizes[&e.occurrence_id])
+                        .context("ZIP payload size overflow")
+                })?,
+                output_bytes: std::fs::metadata(&export.output)?.len(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let output_bytes = archives.iter().try_fold(0u64, |n, a| {
+        n.checked_add(a.output_bytes)
+            .context("ZIP output size overflow")
     })?;
-    crate::archive::publish(&repo, &plan, &config.output, password.as_deref(), cancelled)?;
-    let output_bytes = std::fs::metadata(&config.output)?.len();
     report.zip = Some(ZipSummary {
+        archives,
         payload_bytes,
         output_bytes,
         saved_bytes: i128::from(payload_bytes) - i128::from(output_bytes),
@@ -194,17 +225,19 @@ pub struct PreviewSummary {
 pub struct Preview {
     pub plan: Vec<PreviewEntry>,
     pub summary: PreviewSummary,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub archives: Vec<archive::ZipExport>,
 }
 
 /// Compute real destinations in sealed disposable storage without changing the output.
 pub fn preview(config: &Config, cancelled: &AtomicBool) -> Result<Preview> {
     config.validate()?;
     let rules = ingest_rules(config)?;
-    if config.zip {
+    if config.zip_enabled() {
         ensure!(!config.output.try_exists()?, "ZIP output already exists");
         output_password(config)?;
     }
-    let existing = if !config.zip && config.output.try_exists()? {
+    let existing = if !config.zip_enabled() && config.output.try_exists()? {
         let repo = Repository::existing(&config.output)?;
         ensure!(
             repo.mode() == config.security.mode,
@@ -230,6 +263,8 @@ pub fn preview(config: &Config, cancelled: &AtomicBool) -> Result<Preview> {
     staging.output = temporary.path().join("repository");
     staging.inputs = inputs;
     staging.zip = false;
+    staging.zip_dirs.clear();
+    staging.zip_each_dir = false;
     staging.output_password_file = None;
     staging.security.mode = SecurityMode::Sealed;
     let report = ingest_repository(&staging, cancelled, &rules)?;
@@ -240,7 +275,19 @@ pub fn preview(config: &Config, cancelled: &AtomicBool) -> Result<Preview> {
         merged.entry(row.occurrence_id.clone()).or_insert(row);
     }
     let records: Vec<_> = merged.into_values().collect();
-    let plan = rules.plan(&records)?;
+    let mut plan = rules.plan(&records)?;
+    let archives = if config.zip_enabled() {
+        archive::plan_exports(&plan, config)?
+    } else {
+        vec![]
+    };
+    if config.zip_enabled() {
+        let selected: BTreeSet<_> = archives
+            .iter()
+            .flat_map(|e| e.entries.iter().map(|p| &p.occurrence_id))
+            .collect();
+        plan.retain(|p| selected.contains(&p.occurrence_id));
+    }
     let sources: BTreeMap<_, _> = records.iter().map(|r| (&r.occurrence_id, r)).collect();
     let unique_files = records
         .iter()
@@ -248,6 +295,7 @@ pub fn preview(config: &Config, cancelled: &AtomicBool) -> Result<Preview> {
         .collect::<BTreeSet<_>>()
         .len();
     Ok(Preview {
+        archives,
         plan: plan
             .into_iter()
             .map(|planned| {
@@ -270,7 +318,7 @@ pub fn preview(config: &Config, cancelled: &AtomicBool) -> Result<Preview> {
 pub fn ingest(config: &Config, cancelled: &AtomicBool) -> Result<RunReport> {
     config.validate()?;
     let rules = ingest_rules(config)?;
-    if config.zip {
+    if config.zip_enabled() {
         return ingest_zip(config, cancelled, &rules);
     }
     ingest_repository(config, cancelled, &rules)

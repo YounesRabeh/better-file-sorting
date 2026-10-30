@@ -64,6 +64,8 @@ impl Default for Limits {
 pub struct Config {
     pub input_mode: InputMode,
     pub zip: bool,
+    pub zip_dirs: Vec<String>,
+    pub zip_each_dir: bool,
     pub output_password_file: Option<PathBuf>,
     pub staging_dir: Option<PathBuf>,
     pub inputs: Vec<PathBuf>,
@@ -81,6 +83,8 @@ impl Default for Config {
         Self {
             input_mode: InputMode::Archives,
             zip: false,
+            zip_dirs: vec![],
+            zip_each_dir: false,
             output_password_file: None,
             staging_dir: None,
             inputs: vec![],
@@ -117,6 +121,12 @@ impl Config {
         if args.zip {
             c.zip = true;
         }
+        if !args.zip_dirs.is_empty() {
+            c.zip_dirs.clone_from(&args.zip_dirs);
+        }
+        if args.zip_each_dir {
+            c.zip_each_dir = true;
+        }
         if let Some(path) = &args.output_password_file {
             c.output_password_file = Some(path.clone());
         }
@@ -150,8 +160,21 @@ impl Config {
     /// Validate worker, security, output, and extraction-limit settings.
     pub fn validate(&self) -> Result<()> {
         let error = |s: &str| Error::Config(s.into());
-        if self.output_password_file.is_some() && !self.zip {
+        if self.output_password_file.is_some() && !self.zip_enabled() {
             return Err(error("output_password_file requires ZIP output").into());
+        }
+        for directory in &self.zip_dirs {
+            if directory.is_empty()
+                || directory.contains(['\\', ':'])
+                || directory.chars().any(char::is_control)
+                || directory
+                    .split('/')
+                    .any(|p| p.is_empty() || p == "." || p == "..")
+            {
+                return Err(
+                    error("zip_dirs must contain safe relative sorted directory paths").into(),
+                );
+            }
         }
         if !(1..=256).contains(&self.workers) {
             return Err(error("workers must be between 1 and 256").into());
@@ -183,5 +206,9 @@ impl Config {
             }
         }
         Ok(())
+    }
+
+    pub fn zip_enabled(&self) -> bool {
+        self.zip || self.zip_each_dir || !self.zip_dirs.is_empty()
     }
 }

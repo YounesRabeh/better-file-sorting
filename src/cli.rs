@@ -36,6 +36,12 @@ pub struct Ingest {
     /// Publish only a compressed ZIP at --output, leaving sources untouched
     #[arg(long)]
     pub zip: bool,
+    /// ZIP only this sorted relative directory; repeat to select several
+    #[arg(long = "zip-dir", value_name = "DIRECTORY")]
+    pub zip_dirs: Vec<String>,
+    /// Create one ZIP per selected directory, or per top-level directory
+    #[arg(long)]
+    pub zip_each_dir: bool,
     /// Protected file containing exactly one password for AES-256 ZIP output
     #[arg(long)]
     pub output_password_file: Option<PathBuf>,

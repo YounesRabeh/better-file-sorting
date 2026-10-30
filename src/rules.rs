@@ -20,7 +20,7 @@ const FIELDS: &[&str] = &[
     "ingest_date",
     "occurrence_id",
 ];
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Planned {
     pub path: String,
     pub sha256: String,

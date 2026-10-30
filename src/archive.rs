@@ -1,7 +1,11 @@
 use crate::{config::Limits, discovery::check_path};
 use anyhow::{Result, ensure};
 use serde::Serialize;
-use std::{fs::File, path::Path};
+use std::{
+    collections::BTreeSet,
+    fs::File,
+    path::{Path, PathBuf},
+};
 use zip::{CompressionMethod, ZipArchive};
 #[derive(Debug, Serialize)]
 pub struct Entry {
@@ -19,6 +23,118 @@ pub struct Entry {
 pub struct Inspection {
     pub archive: String,
     pub entries: Vec<Entry>,
+}
+
+#[derive(Serialize)]
+pub struct ZipExport {
+    pub output: PathBuf,
+    pub entries: Vec<crate::rules::Planned>,
+}
+
+/// Resolve exact sorted-directory selections once for previews and publication.
+pub fn plan_exports(
+    plan: &[crate::rules::Planned],
+    config: &crate::config::Config,
+) -> Result<Vec<ZipExport>> {
+    config.validate()?;
+    let directories: BTreeSet<String> = if config.zip_dirs.is_empty() && config.zip_each_dir {
+        plan.iter()
+            .filter_map(|p| p.path.split_once('/').map(|(d, _)| d.to_string()))
+            .collect()
+    } else {
+        config.zip_dirs.iter().cloned().collect()
+    };
+    let matches = |entry: &crate::rules::Planned, directory: &str| {
+        entry.path.starts_with(&format!("{directory}/"))
+    };
+    for directory in &directories {
+        ensure!(
+            plan.iter().any(|p| matches(p, directory)),
+            "sorted directory not found: {directory}"
+        );
+    }
+    if !config.zip_each_dir {
+        let entries = plan
+            .iter()
+            .filter(|p| directories.is_empty() || directories.iter().any(|d| matches(p, d)))
+            .cloned()
+            .collect();
+        return Ok(vec![ZipExport {
+            output: config.output.clone(),
+            entries,
+        }]);
+    }
+    ensure!(!directories.is_empty(), "no sorted directories to ZIP");
+    let exports: Vec<_> = directories
+        .iter()
+        .map(|directory| ZipExport {
+            output: config.output.join(format!("{directory}.zip")),
+            entries: plan
+                .iter()
+                .filter(|p| matches(p, directory))
+                .cloned()
+                .collect(),
+        })
+        .collect();
+    for (index, a) in exports.iter().enumerate() {
+        for b in &exports[index + 1..] {
+            ensure!(
+                !a.output.starts_with(&b.output) && !b.output.starts_with(&a.output),
+                "ZIP output file conflicts with an output directory"
+            );
+        }
+    }
+    Ok(exports)
+}
+
+/// Build every ZIP before publishing a new output directory as one generation.
+pub fn publish_exports(
+    repo: &crate::storage::Repository,
+    exports: &[ZipExport],
+    config: &crate::config::Config,
+    password: Option<&str>,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<()> {
+    if !config.zip_each_dir {
+        let export = exports
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("no ZIP export planned"))?;
+        return publish(repo, &export.entries, &export.output, password, cancelled);
+    }
+    let parent = config
+        .output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let staging = crate::security::private_tempdir(parent, ".bfs-exports-")?;
+    for export in exports {
+        let relative = export.output.strip_prefix(&config.output)?;
+        let mut directory = staging.path().to_path_buf();
+        for part in relative.parent().unwrap_or(Path::new("")).components() {
+            ensure!(
+                matches!(part, std::path::Component::Normal(_)),
+                "unsafe ZIP output path"
+            );
+            directory.push(part);
+            crate::security::private_dir(&directory)?;
+        }
+        publish(
+            repo,
+            &export.entries,
+            &staging.path().join(relative),
+            password,
+            cancelled,
+        )?;
+    }
+    ensure!(
+        !cancelled.load(std::sync::atomic::Ordering::Relaxed),
+        "interrupted"
+    );
+    check_path(&config.output)?;
+    ensure!(!config.output.try_exists()?, "ZIP output already exists");
+    crate::security::publish_directory(staging.path(), &config.output)?;
+    File::open(parent)?.sync_all()?;
+    Ok(())
 }
 /// Open a ZIP archive after enforcing input-size and entry-count limits.
 pub fn open(path: &Path, limits: &Limits) -> Result<ZipArchive<File>> {

@@ -28,6 +28,8 @@ Examples use `bfs` on your `PATH`. After a local build, use
 | `--output <PATH>` | Repository directory, or destination ZIP path when ZIP output is enabled. | `repository`; use an explicit ZIP filename with `--zip`. |
 | `--rules <FILE>` | Load the central sorting policy: filename policy, ordered matchers, templates and duplicate handling. | Built-in rules: first occurrence per content hash, grouped by file type, named `{sha256}.sample`. Use `rules.files.example.toml` to retain ordinary filenames. |
 | `--zip` | Enable ZIP-only output. Refuses existing destinations and failed or interrupted runs. | Disabled. Can also be enabled with `zip = true` in config. |
+| `--zip-dir <DIRECTORY>` | Select a sorted relative directory including descendants; repeat to select several. Enables ZIP output automatically. Selections are exact and case-sensitive. | All sorted entries when omitted. CLI selections replace configured `zip_dirs`. |
+| `--zip-each-dir` | Create one ZIP per selected directory; without selections, one per top-level sorted directory. Enables ZIP output; `--output` becomes a new directory. | Disabled. Config: `zip_each_dir = true`. |
 | `--output-password-file <FILE>` | Encrypt output contents with AES-256. The file must have `0600` permissions and contain exactly one nonempty password line. | No output encryption. Requires ZIP output. |
 | `--staging-dir <DIR>` | Select an existing directory for private ZIP/preview working storage. Symlink paths are refused; a private child is created and cleaned up. Repository ingestion keeps its internal staging location. | ZIP: output parent. Preview: system temporary directory. CLI overrides `staging_dir` in config. |
 | `--password-file <FILE>` | Read candidate passwords for encrypted input archives, one per nonempty line, from a `0600` file. Independent of the output password. | No candidates. |
@@ -49,6 +51,41 @@ Examples use `bfs` on your `PATH`. After a local build, use
 | `reorganize` | `--rules <FILE>` | Required TOML sorting policy. |
 | `reorganize` | `--dry-run` | Print the proposed layout as JSON without publishing a new view. |
 | All commands | `--help` / `-h` | Show help for that command. |
+
+## Selecting sorted directories
+
+```sh
+# One ZIP containing only these sorted directories.
+bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml \
+  --zip-dir documents/pdf --zip-dir text --output ./selected.zip
+
+# Separate ZIPs for every top-level sorted directory.
+bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml \
+  --zip-each-dir --output ./exports
+
+# Separate ZIPs only for selected directories.
+bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml \
+  --zip-dir documents/pdf --zip-dir text --zip-each-dir --output ./exports
+```
+
+Selections refer to destinations produced by the sorting rules, after duplicate
+handling. `--zip-dir documents` includes nested directories; a parent and child
+selection include each entry only once in a combined ZIP. In separate mode,
+each explicitly selected directory has its own archive, so overlapping selections
+can repeat files across archives.
+
+Separate mode writes `exports/documents/pdf.zip` and `exports/text.zip` for those
+selections. Each archive preserves the complete sorted paths and includes only
+its own entries in `layout.jsonl`. All archives use the same optional output
+password. Unselected files are omitted from ZIP output; sources remain untouched.
+Paths must be safe relative directories, without `..`, absolute paths, or glob
+patterns. Missing directories and conflicting output paths are errors.
+
+`--dry-run` includes the selected layout and an `archives` array showing output
+paths and archive entries. Separate exports are built in private temporary
+storage beside the destination and published together as a new output directory.
+Existing files or output directories are refused. As with ZIP-only output, no
+permanent repository is retained.
 
 ## Password-protected ZIP example
 
@@ -84,8 +121,10 @@ See the [ZIP usage notes](../README.md#sort-regular-folders-and-zip-the-result).
 | --- | --- |
 | Preview `plan` | Final paths, content hashes, occurrence IDs, source paths and original entry names after duplicate/collision handling. |
 | Preview `summary` | Combined occurrences, unique files and duplicate occurrences, including existing repository metadata. |
+| Preview `archives` | Output ZIP paths and their selected entries; present in ZIP modes. |
 | Report `first_failure` | First failing source, optional entry index and cause; omitted on success. ZIP failures print this detail before cleaning temporary reports. |
 | Report `zip.payload_bytes` | Total bytes of policy-selected payload entries, counting repeated entries if duplicate policy retains them. |
+| Report `zip.archives` | Output path, payload bytes and final bytes for each ZIP. Aggregate ZIP byte/savings fields cover all exported archives, including repeated files in overlapping separate selections. |
 | Report `zip.output_bytes` | Actual published ZIP size, including layout metadata and ZIP overhead. |
 | Report `zip.saved_bytes` | Payload bytes minus final ZIP bytes. Negative means growth. |
 | Report `zip.savings_percent` | Percentage saved relative to payload bytes; `null` when payload bytes are zero. |
