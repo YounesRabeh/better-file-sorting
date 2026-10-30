@@ -10,7 +10,7 @@
     <a href="docs/README.md"><img src="https://img.shields.io/badge/Documentation_Hub-0969DA?style=for-the-badge&amp;logo=mdbook&amp;logoColor=white" alt="Documentation hub"></a>
   </p>
 
-  <p>A CLI that turns ZIP sample collections into deduplicated, organized repositories.</p>
+  <p>A CLI that turns sample collections into organized repositories.</p>
 
   <p>
     <a href="#features">Features</a> •

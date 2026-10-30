@@ -1,41 +1,85 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320" role="img" aria-labelledby="title desc">
-  <title id="title">Better File Sorting</title>
-  <desc id="desc">Better File Sorting beside an amber archive branching into three neatly arranged violet files.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-labelledby="title desc">
+  <title id="title">Better File Sorting — Your files. Your rules.</title>
+  <desc id="desc">A dark banner with the Better File Sorting title and a folder tree organized into documents, media and other files. A ZIP output card highlights optional AES-256 encryption.</desc>
   <defs>
-    <linearGradient id="background" x1="0" y1="0" x2="1280" y2="320" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#11121C"/>
-      <stop offset="1" stop-color="#211A30"/>
+    <linearGradient id="background" x1="0" y1="0" x2="1280" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101820"/>
+      <stop offset="1" stop-color="#142A30"/>
     </linearGradient>
-    <radialGradient id="light">
-      <stop stop-color="#9D76ED" stop-opacity=".13"/>
-      <stop offset="1" stop-color="#9D76ED" stop-opacity="0"/>
+    <radialGradient id="glow">
+      <stop stop-color="#5EE0C0" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#5EE0C0" stop-opacity="0"/>
     </radialGradient>
+    <linearGradient id="accent" x1="64" y1="0" x2="582" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#70E5C7"/>
+      <stop offset="1" stop-color="#BAF3DD"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#B3E4D7" stroke-opacity=".035"/>
+    </pattern>
   </defs>
-  <rect width="1280" height="320" rx="24" fill="url(#background)"/>
-  <ellipse cx="1000" cy="160" rx="340" ry="240" fill="url(#light)"/>
-  <rect x=".5" y=".5" width="1279" height="319" rx="23.5" fill="none" stroke="#FFFFFF" stroke-opacity=".07"/>
-  <text x="72" y="180" fill="#F8F5FF" font-family="DejaVu Sans, Arial, sans-serif" font-size="52" font-weight="700" letter-spacing="-2">Better File Sorting</text>
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M887 160H950M950 160V96H1014M950 160H1014M950 160V224H1014" stroke="#806599" stroke-width="2"/>
-    <circle cx="950" cy="160" r="4" fill="#C8ACF9" stroke="none"/>
-    <rect x="799" y="112" width="88" height="96" rx="14" fill="#FFBB70" fill-opacity=".08" stroke="#FFBB70" stroke-width="2"/>
-    <path d="M843 114V145M837 125H849M837 136H849" stroke="#FFBB70" stroke-width="2.5"/>
-    <rect x="836" y="148" width="14" height="21" rx="4" stroke="#FFBB70" stroke-width="2"/>
-    <path d="M821 190H865" stroke="#FFBB70" stroke-opacity=".4" stroke-width="2"/>
-    <g fill="#2D233D" stroke="#AF8BD9" stroke-width="1.5">
-      <rect x="1014" y="73" width="154" height="46" rx="10"/>
-      <rect x="1014" y="137" width="154" height="46" rx="10"/>
-      <rect x="1014" y="201" width="154" height="46" rx="10"/>
+
+  <rect width="1280" height="400" rx="24" fill="url(#background)"/>
+  <rect x="720" y="24" width="536" height="352" rx="20" fill="url(#grid)"/>
+  <ellipse cx="1010" cy="200" rx="270" ry="185" fill="url(#glow)"/>
+  <rect x=".5" y=".5" width="1279" height="399" rx="23.5" fill="none" stroke="#D2F4EA" stroke-opacity=".1"/>
+
+  <g font-family="DejaVu Sans, Arial, sans-serif">
+    <rect x="64" y="49" width="44" height="30" rx="7" fill="#70E5C7"/>
+    <text x="86" y="69" text-anchor="middle" font-size="13" font-weight="700" fill="#102621">bfs</text>
+    <text x="124" y="69" font-size="12" letter-spacing="2.2" font-weight="700" fill="#9FB8B9">FILE ORGANIZATION, SIMPLIFIED</text>
+
+    <text x="60" y="164" font-size="66" font-weight="700" letter-spacing="-2.8" fill="#F4F8F6">Better File</text>
+    <text x="60" y="239" font-size="66" font-weight="700" letter-spacing="-2.8" fill="url(#accent)">Sorting</text>
+    <text x="64" y="287" font-size="24" fill="#D6E6E1">Your files. Your rules.</text>
+    <text x="64" y="321" font-size="17" fill="#9FB8B9">Sort folders and archives. Keep everything in place.</text>
+
+    <g font-size="11" font-weight="700" letter-spacing="1.1" fill="#A5C6BC">
+      <circle cx="68" cy="357" r="3" fill="#70E5C7"/>
+      <text x="80" y="361">CENTRAL POLICIES</text>
+      <circle cx="266" cy="357" r="3" fill="#70E5C7"/>
+      <text x="278" y="361">DEDUPLICATION</text>
+      <circle cx="451" cy="357" r="3" fill="#70E5C7"/>
+      <text x="463" y="361">OPTIONAL ZIP</text>
     </g>
-    <g stroke="#DDC8FA" stroke-width="1.5">
-      <path d="M1032 85H1042L1048 91V107H1032ZM1042 85V91H1048"/>
-      <path d="M1032 149H1042L1048 155V171H1032ZM1042 149V155H1048"/>
-      <path d="M1032 213H1042L1048 219V235H1032ZM1042 213V219H1048"/>
+
+    <rect x="758" y="43" width="458" height="314" rx="18" fill="#0C181E" stroke="#35514F"/>
+    <circle cx="784" cy="68" r="3" fill="#70E5C7"/>
+    <text x="796" y="72" font-size="11" letter-spacing="1.6" font-weight="700" fill="#A7C7C0">A PLACE FOR EVERY FILE</text>
+    <path d="M759 91H1215" stroke="#29413F"/>
+
+    <g fill="none" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M786 119H799L805 125H824V143H786Z" fill="#E9B86D" fill-opacity=".12" stroke="#E9B86D" stroke-width="1.8"/>
+      <path d="M786 126H824" stroke="#E9B86D" stroke-width="1.8"/>
+      <path d="M805 156V253M805 176H841M805 214H841M805 252H841" stroke="#385D55" stroke-width="1.5"/>
+      <g stroke="#76CBB2" stroke-width="1.5" fill="#18372F">
+        <path d="M848 166H858L862 170H874V185H848Z"/>
+        <path d="M848 204H858L862 208H874V223H848Z"/>
+        <path d="M848 242H858L862 246H874V261H848Z"/>
+      </g>
     </g>
-    <g stroke="#A18AB9" stroke-width="2" stroke-opacity=".65">
-      <path d="M1064 91H1148M1064 101H1120"/>
-      <path d="M1064 155H1148M1064 165H1120"/>
-      <path d="M1064 219H1148M1064 229H1120"/>
+    <g font-family="DejaVu Sans Mono, monospace" font-size="15">
+      <text x="840" y="137" fill="#E9C589">your-files/</text>
+      <text x="891" y="181" fill="#E0EEE8">documents/</text>
+      <text x="891" y="219" fill="#E0EEE8">media/</text>
+      <text x="891" y="257" fill="#E0EEE8">other/</text>
     </g>
+    <g fill="#89A9A0" font-size="10" font-weight="700" letter-spacing="1">
+      <text x="1179" y="137" text-anchor="end">INPUT</text>
+      <text x="1179" y="181" text-anchor="end">SORTED</text>
+      <text x="1179" y="219" text-anchor="end">BY YOUR</text>
+      <text x="1179" y="257" text-anchor="end">POLICY</text>
+    </g>
+
+    <rect x="778" y="284" width="418" height="53" rx="10" fill="#17352E" stroke="#335D4F"/>
+    <g fill="none" stroke="#84DEC1" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M795 298H808L814 304V323H795Z"/>
+      <path d="M808 298V304H814M803 302V315M800 307H806M800 312H806"/>
+      <rect x="802" y="316" width="4" height="5" rx="1"/>
+      <rect x="1042" y="308" width="12" height="10" rx="2"/>
+      <path d="M1045 308V304A3 3 0 0 1 1051 304V308"/>
+    </g>
+    <text x="831" y="317" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#C3F4DF">sorted.zip</text>
+    <text x="1178" y="316" text-anchor="end" font-size="11" fill="#A8D8C4">AES-256 optional</text>
   </g>
 </svg>
