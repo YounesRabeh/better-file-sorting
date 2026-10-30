@@ -63,13 +63,62 @@ fn create_journal_file(root: &Path, directory: &str, run_id: &str) -> Result<Fil
     File::open(root.join(directory))?.sync_all()?;
     Ok(file)
 }
+
+/// Sort in disposable private storage; publish only a complete ZIP without overwriting.
+fn ingest_zip(config: &Config, cancelled: &AtomicBool) -> Result<RunReport> {
+    discovery::check_path(&config.output)?;
+    ensure!(!config.output.try_exists()?, "ZIP output already exists");
+    let passwords = security::passwords(config.output_password_file.as_deref())?;
+    if config.output_password_file.is_some() {
+        ensure!(
+            passwords.len() == 1,
+            "output password file must contain exactly one nonempty password"
+        );
+    }
+    let parent = config
+        .output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let temporary = security::private_tempdir(parent, ".bfs-zip-")?;
+    let mut staging = config.clone();
+    staging.output = temporary.path().join("repository");
+    staging.zip = false;
+    staging.output_password_file = None;
+    // Only this new disposable repository is readable; existing sealed storage stays sealed.
+    // shortcut: private plaintext staging can survive SIGKILL; use encrypted scratch storage for crash confidentiality.
+    staging.security.mode = crate::config::SecurityMode::Standard;
+    // Discover before staging exists, so sources cannot include temporary payloads.
+    staging.inputs = discovery::for_ingest(config)?;
+    ensure!(!staging.inputs.is_empty(), "no matching input files found");
+    let report = ingest(&staging, cancelled)?;
+    ensure!(
+        report.failures == 0 && !report.interrupted,
+        "ZIP not published: ingest failed or was interrupted"
+    );
+    let repo = Repository::existing(&staging.output)?;
+    let records = metadata::load(repo.root())?;
+    let rules = crate::rules::Rules::load(config.rules.as_deref())?;
+    let plan = rules.plan(&records)?;
+    crate::archive::publish(
+        &repo,
+        &plan,
+        &config.output,
+        passwords.first().map(String::as_str),
+        cancelled,
+    )?;
+    Ok(report)
+}
 /// Ingest discovered archives with bounded parallel workers and durable metadata.
 pub fn ingest(config: &Config, cancelled: &AtomicBool) -> Result<RunReport> {
     config.validate()?;
+    if config.zip {
+        return ingest_zip(config, cancelled);
+    }
     let rules = crate::rules::Rules::load(config.rules.as_deref())?;
     let passwords = security::passwords(config.password_file.as_deref())?;
-    let paths = discovery::discover(&config.inputs, config.recursive, &config.output)?;
-    ensure!(!paths.is_empty(), "no ZIP archives found");
+    let paths = discovery::for_ingest(config)?;
+    ensure!(!paths.is_empty(), "no matching input files found");
     let repo = Repository::open(&config.output, config.security.mode)?;
     let marker = security::private_tempdir(&repo.staging(), "run-")?;
     let run_id = format!(
@@ -100,27 +149,48 @@ pub fn ingest(config: &Config, cancelled: &AtomicBool) -> Result<RunReport> {
                 return Ok(());
             }
             let work = || -> Result<()> {
-                let mut zip = archive::open(path, &config.limits)?;
+                let mut zip = if config.input_mode == crate::config::InputMode::Archives {
+                    Some(archive::open(path, &config.limits)?)
+                } else {
+                    None
+                };
                 let mut total = 0;
-                for index in 0..zip.len() {
+                for index in 0..zip.as_ref().map_or(1, |z| z.len()) {
                     if cancelled.load(Ordering::Relaxed) {
                         break;
                     }
-                    let data = zip.by_index_data(index)?;
-                    if data.is_dir() {
-                        continue;
-                    }
-                    let encrypted = data.encrypted();
-                    let original = data.name()?.into_owned();
-                    let result = extraction::extract(
-                        &mut zip,
-                        index,
-                        &passwords,
-                        marker.path(),
-                        &config.limits,
-                        &mut total,
-                        cancelled,
-                    );
+                    let (encrypted, original, result) = if let Some(zip) = &mut zip {
+                        let data = zip.by_index_data(index)?;
+                        if data.is_dir() {
+                            continue;
+                        }
+                        let encrypted = data.encrypted();
+                        let original = data.name()?.into_owned();
+                        let result = extraction::extract(
+                            zip,
+                            index,
+                            &passwords,
+                            marker.path(),
+                            &config.limits,
+                            &mut total,
+                            cancelled,
+                        );
+                        (encrypted, original, result)
+                    } else {
+                        (
+                            false,
+                            path.file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned(),
+                            extraction::extract_file(
+                                path,
+                                marker.path(),
+                                &config.limits,
+                                cancelled,
+                            ),
+                        )
+                    };
                     match result {
                         Ok(item) => {
                             let file_type = classifier::classify(&item.prefix).to_string();

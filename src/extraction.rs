@@ -14,6 +14,54 @@ pub struct Extracted {
     pub size: u64,
     pub prefix: Vec<u8>,
 }
+
+/// Copy and hash one ordinary file into private staging with bounded reads.
+pub fn extract_file(
+    path: &Path,
+    staging: &Path,
+    limits: &Limits,
+    cancelled: &AtomicBool,
+) -> Result<Extracted> {
+    crate::discovery::check_path(path)?;
+    ensure!(
+        std::fs::symlink_metadata(path)?.is_file(),
+        "not a regular file"
+    );
+    let mut reader = File::open(path)?;
+    let limit = limits
+        .max_entry_bytes
+        .min(limits.max_input_bytes)
+        .min(limits.max_archive_bytes);
+    ensure!(
+        reader.metadata()?.len() <= limit,
+        "file size limit exceeded"
+    );
+    let mut file = tempfile::NamedTempFile::new_in(staging)?;
+    crate::security::seal(file.as_file(), crate::config::SecurityMode::Sealed)?;
+    let mut hash = Sha256::new();
+    let mut prefix = Vec::with_capacity(8192);
+    let mut size = 0u64;
+    let mut buffer = [0u8; 65536];
+    loop {
+        ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        size += count as u64;
+        ensure!(size <= limit, "file size limit exceeded");
+        hash.update(&buffer[..count]);
+        prefix.extend_from_slice(&buffer[..count.min(8192 - prefix.len())]);
+        file.write_all(&buffer[..count])?;
+    }
+    file.as_file().sync_all()?;
+    Ok(Extracted {
+        file,
+        sha256: hash.finalize().iter().map(|b| format!("{b:02x}")).collect(),
+        size,
+        prefix,
+    })
+}
 /// Validate an archive entry name before using it as metadata.
 pub fn validate_name(name: &str) -> Result<()> {
     ensure!(

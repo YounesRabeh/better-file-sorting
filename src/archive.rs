@@ -61,3 +61,57 @@ pub fn inspect(path: &Path, limits: &Limits) -> Result<Inspection> {
         entries,
     })
 }
+
+/// Write the logical policy layout, then atomically publish a private ZIP.
+pub fn publish(
+    repo: &crate::storage::Repository,
+    plan: &[crate::rules::Planned],
+    output: &Path,
+    password: Option<&str>,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<()> {
+    use std::{
+        io::{Read, Write},
+        sync::atomic::Ordering,
+    };
+    check_path(output)?;
+    let parent = output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
+    let mut zip = zip::ZipWriter::new(file.as_file_mut());
+    let mut options = zip::write::SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .unix_permissions(0o600);
+    if let Some(password) = password {
+        options = options.with_aes_encryption(zip::AesMode::Aes256, password);
+    }
+    let mut buffer = [0u8; 65536];
+    for entry in plan {
+        ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
+        let source = repo.object(&entry.sha256)?;
+        crate::security::validate_file(&source, crate::config::SecurityMode::Standard)?;
+        let mut source = File::open(source)?;
+        zip.start_file(&entry.path, options)?;
+        loop {
+            ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
+            let count = source.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            zip.write_all(&buffer[..count])?;
+        }
+    }
+    zip.start_file("layout.jsonl", options)?;
+    for entry in plan {
+        serde_json::to_writer(&mut zip, entry)?;
+        zip.write_all(b"\n")?;
+    }
+    zip.finish()?;
+    file.as_file().sync_all()?;
+    ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
+    file.persist_noclobber(output)?;
+    File::open(parent)?.sync_all()?;
+    Ok(())
+}

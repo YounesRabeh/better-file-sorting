@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[derive(Debug, Parser)]
 #[command(
     version,
-    about = "Organize ZIP samples without executing their contents"
+    about = "Sort files or ZIP samples by metadata without executing their contents"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -13,7 +13,7 @@ pub struct Cli {
 }
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Extract, classify and securely store archive contents
+    /// Classify and sort archive contents or ordinary files; optionally ZIP the output
     Ingest(Ingest),
     /// Inspect archive metadata without extracting payloads
     Inspect(Inspect),
@@ -30,6 +30,15 @@ pub enum Command {
 }
 #[derive(Debug, Args)]
 pub struct Ingest {
+    /// Sort ordinary files without opening archives, or extract archives (default)
+    #[arg(long, value_enum)]
+    pub input_mode: Option<crate::config::InputMode>,
+    /// Publish only a compressed ZIP at --output, leaving sources untouched
+    #[arg(long)]
+    pub zip: bool,
+    /// Protected file containing exactly one password for AES-256 ZIP output
+    #[arg(long)]
+    pub output_password_file: Option<PathBuf>,
     pub inputs: Vec<PathBuf>,
     #[arg(long)]
     pub config: Option<PathBuf>,

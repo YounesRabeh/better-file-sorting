@@ -8,6 +8,14 @@ use std::{
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
+pub enum InputMode {
+    #[default]
+    Archives,
+    Files,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, clap::ValueEnum)]
+#[serde(rename_all = "snake_case")]
 pub enum SecurityMode {
     Standard,
     #[default]
@@ -54,6 +62,9 @@ impl Default for Limits {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    pub input_mode: InputMode,
+    pub zip: bool,
+    pub output_password_file: Option<PathBuf>,
     pub inputs: Vec<PathBuf>,
     pub output: PathBuf,
     pub recursive: bool,
@@ -67,6 +78,9 @@ impl Default for Config {
     /// Return configuration defaults with bounded worker parallelism.
     fn default() -> Self {
         Self {
+            input_mode: InputMode::Archives,
+            zip: false,
+            output_password_file: None,
             inputs: vec![],
             output: "repository".into(),
             recursive: true,
@@ -95,6 +109,15 @@ impl Config {
     /// Merge CLI ingest overrides into file or default configuration.
     pub fn for_ingest(args: &Ingest) -> Result<Self> {
         let mut c = Self::load(args.config.as_deref())?;
+        if let Some(mode) = args.input_mode {
+            c.input_mode = mode;
+        }
+        if args.zip {
+            c.zip = true;
+        }
+        if let Some(path) = &args.output_password_file {
+            c.output_password_file = Some(path.clone());
+        }
         if !args.inputs.is_empty() {
             c.inputs.clone_from(&args.inputs);
         }
@@ -122,6 +145,9 @@ impl Config {
     /// Validate worker, security, output, and extraction-limit settings.
     pub fn validate(&self) -> Result<()> {
         let error = |s: &str| Error::Config(s.into());
+        if self.output_password_file.is_some() && !self.zip {
+            return Err(error("output_password_file requires ZIP output").into());
+        }
         if !(1..=256).contains(&self.workers) {
             return Err(error("workers must be between 1 and 256").into());
         }

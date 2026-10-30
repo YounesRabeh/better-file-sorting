@@ -6,6 +6,7 @@ Choose a reference by task:
 
 | I want to… | Start here |
 | --- | --- |
+| Understand every command and option | [Command reference](commands.md) |
 | Review implementation status and validation evidence | [Validation record](validation.md) |
 | Read the packaged release notes | [Release README](RELEASE_README.md) |
 | Inspect the benchmark output | [Benchmark results](benchmark-tmpfs.jsonl) |

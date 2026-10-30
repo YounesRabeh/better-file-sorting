@@ -1,5 +1,8 @@
 inputs = ["downloads"]
 output = "repository"
+# input_mode = "files" # Default: "archives"; files mode sorts ZIPs as files too
+# zip = true # output must then name a new ZIP file, e.g. "sorted.zip"
+# output_password_file = "output-password.txt" # 0600, exactly one nonempty line
 recursive = true
 workers = 4
 # password_file = "passwords.txt" # Private local file, one candidate per line

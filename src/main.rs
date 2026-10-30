@@ -11,8 +11,11 @@ fn run(cli: Cli) -> Result<u8> {
             let config = Config::for_ingest(&args)?;
             if args.dry_run {
                 bfs::rules::Rules::load(config.rules.as_deref())?;
-                let paths =
-                    bfs::discovery::discover(&config.inputs, config.recursive, &config.output)?;
+                let paths = bfs::discovery::for_ingest(&config)?;
+                if config.input_mode == bfs::config::InputMode::Files {
+                    println!("{}", serde_json::to_string_pretty(&paths)?);
+                    return Ok(0);
+                }
                 let inspections = paths
                     .iter()
                     .map(|p| bfs::archive::inspect(p, &config.limits))

@@ -30,6 +30,16 @@ pub fn check_path(path: &Path) -> Result<()> {
 }
 /// Discover ZIP files while excluding symlinks and the output repository.
 pub fn discover(inputs: &[PathBuf], recursive: bool, output: &Path) -> Result<Vec<PathBuf>> {
+    discover_inputs(inputs, recursive, output, false)
+}
+
+/// Discover ordinary files or archives without following links or entering output.
+pub fn discover_inputs(
+    inputs: &[PathBuf],
+    recursive: bool,
+    output: &Path,
+    files: bool,
+) -> Result<Vec<PathBuf>> {
     ensure!(!inputs.is_empty(), "provide at least one input path");
     check_path(output)?;
     let excluded = if output.exists() {
@@ -56,6 +66,10 @@ pub fn discover(inputs: &[PathBuf], recursive: bool, output: &Path) -> Result<Ve
             if !item.file_type().is_file() {
                 continue;
             }
+            if files {
+                paths.insert(item.path().canonicalize()?);
+                continue;
+            }
             let mut signature = [0; 4];
             let read = File::open(item.path())?.read(&mut signature)?;
             if read == 4 && matches!(&signature, b"PK\x03\x04" | b"PK\x05\x06" | b"PK\x07\x08") {
@@ -64,4 +78,49 @@ pub fn discover(inputs: &[PathBuf], recursive: bool, output: &Path) -> Result<Ve
         }
     }
     Ok(paths.into_iter().collect())
+}
+
+/// Discover ingest sources, excluding protected password files in either mode.
+pub fn for_ingest(config: &crate::config::Config) -> Result<Vec<PathBuf>> {
+    let mut paths = discover_inputs(
+        &config.inputs,
+        config.recursive,
+        &config.output,
+        config.input_mode == crate::config::InputMode::Files,
+    )?;
+    let secrets = [
+        config.password_file.as_deref(),
+        config.output_password_file.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(Path::canonicalize)
+    .collect::<std::io::Result<Vec<_>>>()?;
+    paths.retain(|p| !secrets.contains(p));
+    #[cfg(unix)]
+    if !secrets.is_empty() {
+        use std::os::unix::fs::MetadataExt;
+        let identities = secrets
+            .iter()
+            .map(std::fs::metadata)
+            .collect::<std::io::Result<Vec<_>>>()?;
+        let mut safe = Vec::with_capacity(paths.len());
+        for path in paths {
+            let meta = std::fs::metadata(&path)?;
+            if !identities
+                .iter()
+                .any(|secret| secret.dev() == meta.dev() && secret.ino() == meta.ino())
+            {
+                safe.push(path);
+            }
+        }
+        paths = safe;
+    }
+    if config.input_mode == crate::config::InputMode::Files {
+        ensure!(
+            paths.len() <= config.limits.max_entries,
+            "file count limit exceeded"
+        );
+    }
+    Ok(paths)
 }
