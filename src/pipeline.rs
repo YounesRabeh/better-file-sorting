@@ -421,12 +421,18 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                                         .collect();
                                     format!("encoded-path:{hex}")
                                 });
+                            let identity_source = config
+                                .remote_inputs
+                                .get(path)
+                                .map(|c| c.source_id.as_str())
+                                .unwrap_or(&source_path);
                             let id = metadata::digest(&serde_json::to_vec(&(
-                                &source_path,
+                                identity_source,
                                 index,
                                 &item.sha256,
                             ))?);
                             let record = Occurrence {
+                                provenance: config.remote_inputs.get(path).cloned(),
                                 input_mode: config.input_mode,
                                 occurrence_id: id,
                                 sha256: item.sha256,

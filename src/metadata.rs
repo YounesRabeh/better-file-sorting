@@ -11,6 +11,8 @@ use std::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Occurrence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<crate::acquisition::Candidate>,
     /// Old manifests conservatively retain archive-sample safeguards.
     #[serde(default)]
     pub input_mode: crate::config::InputMode,

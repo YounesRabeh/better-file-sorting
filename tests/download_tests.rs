@@ -93,3 +93,67 @@ fn over_limit_payload_is_not_published() {
             .exists()
     );
 }
+
+#[test]
+fn sealed_receipt_requires_explicit_unlock_then_verifies_hash() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_root, config, report) = transfer(b"fixture", "1 KB");
+    assert!(
+        bfs::acquisition::completed_inputs(&config)
+            .unwrap_err()
+            .to_string()
+            .contains("unlock")
+    );
+    let path = config
+        .staging_dir
+        .join(download::payload_path(&config, &report.candidates[0]));
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        bfs::acquisition::completed_inputs(&config).unwrap().len(),
+        1
+    );
+    std::fs::write(&path, b"changed").unwrap();
+    assert!(bfs::acquisition::completed_inputs(&config).is_err());
+}
+
+#[test]
+fn downloaded_zip_flows_through_existing_ingest() {
+    use std::{io::Write, os::unix::fs::PermissionsExt, sync::atomic::AtomicBool};
+    let mut bytes = std::io::Cursor::new(vec![]);
+    {
+        let mut zip = zip::ZipWriter::new(&mut bytes);
+        zip.start_file("hello.txt", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"hello world").unwrap();
+        zip.finish().unwrap();
+    }
+    let (root, config, report) = transfer(Box::leak(bytes.into_inner().into_boxed_slice()), "1 MB");
+    let payload = config
+        .staging_dir
+        .join(download::payload_path(&config, &report.candidates[0]));
+    std::fs::set_permissions(payload, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let config_path = root.path().join("collection.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "output = '{}'\nzip = true\n[download]\nstaging_dir = '{}'\n",
+            root.path().join("sorted.zip").display(),
+            config.staging_dir.display()
+        ),
+    )
+    .unwrap();
+    use clap::Parser;
+    let bfs::cli::Command::Ingest(args) =
+        bfs::cli::Cli::parse_from(["bfs", "ingest", "--config", config_path.to_str().unwrap()])
+            .command
+    else {
+        panic!()
+    };
+    let ingest = bfs::config::Config::for_ingest(&args).unwrap();
+    let preview = bfs::pipeline::preview(&ingest, &AtomicBool::new(false)).unwrap();
+    assert_eq!(preview.plan.len(), 1);
+    let result = bfs::pipeline::ingest(&ingest, &AtomicBool::new(false)).unwrap();
+    assert_eq!(result.accepted, 1);
+    assert_eq!(result.failures, 0);
+    assert!(root.path().join("sorted.zip").is_file());
+}

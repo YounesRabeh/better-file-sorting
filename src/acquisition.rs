@@ -297,3 +297,69 @@ pub fn private_tree(path: &Path) -> Result<()> {
     }
     crate::security::private_dir(path)
 }
+
+#[derive(Debug)]
+pub struct CompletedInput {
+    pub path: PathBuf,
+    pub receipt: DownloadReceipt,
+}
+pub fn completed_inputs(config: &DownloadConfig) -> Result<Vec<CompletedInput>> {
+    use sha2::{Digest, Sha256};
+    let control = config.staging_dir.join("control");
+    crate::discovery::check_path(&control)?;
+    let mut inputs = vec![];
+    for entry in std::fs::read_dir(control)? {
+        let entry = entry?;
+        if entry.path().extension().is_none_or(|e| e != "json") {
+            continue;
+        }
+        let receipt: DownloadReceipt = load_json(&entry.path())?;
+        ensure!(
+            receipt.version == 1
+                && crate::storage::valid_hash(&receipt.sha256)
+                && receipt.candidate.source_id
+                    == crate::metadata::digest(receipt.candidate.url.as_bytes()),
+            "invalid download receipt"
+        );
+        crate::http_source::safe_url(&receipt.candidate.url)?;
+        ensure!(
+            receipt.path == crate::download::payload_path(config, &receipt.candidate),
+            "unsafe receipt path"
+        );
+        let path = config.staging_dir.join(&receipt.path);
+        if crate::security::validate_file(&path, crate::config::SecurityMode::Sealed).is_ok() {
+            anyhow::bail!(
+                "download is sealed; explicitly unlock selected payloads to 0600 before ingest"
+            );
+        }
+        crate::security::validate_file(&path, crate::config::SecurityMode::Standard)?;
+        let mut reader = File::open(&path)?;
+        ensure!(
+            reader.metadata()?.len() == receipt.size,
+            "download size changed"
+        );
+        let mut hash = Sha256::new();
+        let mut buffer = [0; 65536];
+        loop {
+            let n = reader.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            hash.update(&buffer[..n]);
+        }
+        let actual: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        ensure!(actual == receipt.sha256, "download hash changed");
+        inputs.push(CompletedInput {
+            path: path.canonicalize()?,
+            receipt,
+        });
+    }
+    inputs.sort_by(|a, b| {
+        a.receipt
+            .candidate
+            .source_id
+            .cmp(&b.receipt.candidate.source_id)
+    });
+    ensure!(!inputs.is_empty(), "no completed downloads found");
+    Ok(inputs)
+}

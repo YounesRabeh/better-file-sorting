@@ -62,6 +62,8 @@ impl Default for Limits {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    #[serde(skip)]
+    pub remote_inputs: std::collections::BTreeMap<PathBuf, crate::acquisition::Candidate>,
     pub source: Option<crate::acquisition::SourceConfig>,
     pub download: Option<crate::acquisition::DownloadConfig>,
     pub input_mode: InputMode,
@@ -83,6 +85,7 @@ impl Default for Config {
     /// Return configuration defaults with bounded worker parallelism.
     fn default() -> Self {
         Self {
+            remote_inputs: Default::default(),
             source: None,
             download: None,
             input_mode: InputMode::Archives,
@@ -157,6 +160,15 @@ impl Config {
         }
         if let Some(v) = args.recursive {
             c.recursive = v;
+        }
+        if c.inputs.is_empty() {
+            if let Some(download) = &c.download {
+                for input in crate::acquisition::completed_inputs(download)? {
+                    c.remote_inputs
+                        .insert(input.path.clone(), input.receipt.candidate);
+                    c.inputs.push(input.path);
+                }
+            }
         }
         c.validate()?;
         Ok(c)
