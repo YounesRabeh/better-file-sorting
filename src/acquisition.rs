@@ -278,6 +278,7 @@ pub fn load_inventory(path: &Path) -> Result<Inventory> {
     ensure!(inventory.version == 1, "unsupported inventory version");
     let mut ids = std::collections::BTreeSet::new();
     for c in &inventory.candidates {
+        crate::http_source::safe_url(&c.url)?;
         ensure!(
             c.source_id == crate::metadata::digest(c.url.as_bytes()) && ids.insert(&c.source_id),
             "invalid or duplicate source identity"
@@ -290,9 +291,11 @@ pub fn load_inventory(path: &Path) -> Result<Inventory> {
 pub fn private_tree(path: &Path) -> Result<()> {
     crate::discovery::check_path(path)?;
     if path.is_dir() {
-        return Ok(());
+        return crate::security::private_dir(path);
     }
-    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty())
+        && !parent.is_dir()
+    {
         private_tree(parent)?;
     }
     crate::security::private_dir(path)
@@ -304,6 +307,7 @@ pub struct CompletedInput {
     pub receipt: DownloadReceipt,
 }
 pub fn completed_inputs(config: &DownloadConfig) -> Result<Vec<CompletedInput>> {
+    config.validate()?;
     use sha2::{Digest, Sha256};
     let control = config.staging_dir.join("control");
     crate::discovery::check_path(&control)?;

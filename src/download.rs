@@ -31,7 +31,7 @@ fn safe_component(text: &str) -> String {
     let value: String = text
         .chars()
         .map(|c| {
-            if c.is_alphanumeric() || matches!(c, '-' | '_') {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
                 c
             } else {
                 '_'
@@ -129,7 +129,7 @@ pub fn run(
             ensure!(
                 saved.version == 1
                     && saved.candidate.source_id == candidate.source_id
-                    && saved.path == payload_path(config, candidate),
+                    && saved.path == payload_path(config, &saved.candidate),
                 "invalid download receipt"
             );
             let path = config.staging_dir.join(&saved.path);
@@ -165,10 +165,17 @@ pub fn run(
                     #[cfg(unix)]
                     {
                         use std::os::unix::fs::PermissionsExt;
-                        builder.permissions(std::fs::Permissions::from_mode(0));
+                        builder.permissions(std::fs::Permissions::from_mode(0o000));
                     }
                     let mut file = builder.tempfile_in(&payloads)?;
                     security::seal(file.as_file(), SecurityMode::Sealed)?;
+                    {
+                        let b = budget.lock().unwrap();
+                        ensure!(
+                            b.transferred < total_limit && b.staged < staging_limit,
+                            "download byte limit reached"
+                        );
+                    }
                     let (mut response, _) = http.get(&candidate.url, cancelled)?;
                     let expected = response
                         .headers()
@@ -192,7 +199,17 @@ pub fn run(
                             .min(file_limit - size)
                             .min(buffer.len() as u64)
                             as usize;
-                        ensure!(allowance > 0, "download byte limit reached");
+                        if allowance == 0 && size == file_limit && b.transferred < total_limit {
+                            // Probe EOF without writing beyond the file cap; charge any observed byte.
+                            let n = reader.read(&mut buffer[..1])?;
+                            b.transferred += n as u64;
+                            ensure!(n == 0, "file size limit reached");
+                            break;
+                        }
+                        ensure!(
+                            allowance > 0,
+                            "download byte limit reached; EOF not verified"
+                        );
                         let n = reader.read(&mut buffer[..allowance])?;
                         if n == 0 {
                             break;
@@ -209,6 +226,8 @@ pub fn run(
                         hash.update(&buffer[..n]);
                         file.write_all(&buffer[..n])?;
                     }
+                    ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
+                    ensure!(started.elapsed() < timeout, "transfer timeout");
                     file.as_file().sync_all()?;
                     let path = file.into_temp_path();
                     path.persist_noclobber(&target)?;

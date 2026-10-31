@@ -21,6 +21,13 @@ fn transfer(
     body: &'static [u8],
     limit: &str,
 ) -> (tempfile::TempDir, DownloadConfig, DownloadReport) {
+    transfer_with_speed(body, limit, None)
+}
+fn transfer_with_speed(
+    body: &'static [u8],
+    limit: &str,
+    speed: Option<String>,
+) -> (tempfile::TempDir, DownloadConfig, DownloadReport) {
     use std::{
         io::{Read, Write},
         net::TcpListener,
@@ -32,7 +39,7 @@ fn transfer(
     let thread = std::thread::spawn(move || {
         let (mut stream, _) = server.accept().unwrap();
         let mut request = [0; 4096];
-        stream.read(&mut request).unwrap();
+        assert!(stream.read(&mut request).unwrap() > 0);
         write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -51,6 +58,8 @@ fn transfer(
     let config = DownloadConfig {
         staging_dir: root.path().join("downloads"),
         max_file_size: limit.into(),
+        max_speed: speed,
+        timeout_seconds: 1,
         ..Default::default()
     };
     let report = download::run(
@@ -156,4 +165,54 @@ fn downloaded_zip_flows_through_existing_ingest() {
     assert_eq!(result.accepted, 1);
     assert_eq!(result.failures, 0);
     assert!(root.path().join("sorted.zip").is_file());
+}
+
+#[test]
+fn unicode_titles_fit_filesystem_component_limits() {
+    let config = DownloadConfig::default();
+    let candidate = Candidate {
+        source_id: "a".repeat(64),
+        url: "http://localhost/a.zip".into(),
+        title: "界".repeat(100),
+        name: format!("{}.zip", "界".repeat(100)),
+        discovered_at: String::new(),
+    };
+    let path = download::payload_path(&config, &candidate);
+    assert!(path.components().all(|c| c.as_os_str().len() <= 255));
+}
+
+#[test]
+fn final_chunk_pacing_cannot_publish_after_timeout() {
+    let (_root, config, report) = transfer_with_speed(b"fixture", "1 KB", Some("1 B/s".into()));
+    assert_eq!(report.failed, 1);
+    assert!(
+        !config
+            .staging_dir
+            .join(download::payload_path(&config, &report.candidates[0]))
+            .exists()
+    );
+}
+
+#[test]
+fn changed_link_title_reuses_completed_source() {
+    use std::sync::atomic::AtomicBool;
+    let (_root, config, report) = transfer(b"fixture", "1 KB");
+    let mut candidate = report.candidates[0].clone();
+    candidate.title = "New title".into();
+    let source = SourceConfig {
+        page: candidate.url.clone(),
+        ..Default::default()
+    };
+    let result = download::run(
+        &config,
+        &source,
+        &Inventory {
+            version: 1,
+            candidates: vec![candidate],
+        },
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(result.cached, 1);
+    assert_eq!(result.downloaded, 0);
 }

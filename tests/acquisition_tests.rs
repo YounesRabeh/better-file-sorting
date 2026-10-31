@@ -68,3 +68,13 @@ fn limits_and_directory_validation() {
     assert_eq!(config.speed().unwrap(), Some(2_000_000));
     assert_eq!(DownloadConfig::default().speed().unwrap(), None);
 }
+
+#[test]
+fn existing_staging_directory_must_be_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("payloads");
+    std::fs::create_dir(&path).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(bfs::acquisition::private_tree(&path).is_err());
+}

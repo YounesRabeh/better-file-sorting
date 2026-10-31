@@ -47,6 +47,7 @@ pub struct HttpSource {
     origin: Url,
     same_origin: bool,
     interval: Duration,
+    timeout: Duration,
     max_requests: Option<usize>,
     gate: Mutex<Gate>,
 }
@@ -63,6 +64,7 @@ impl HttpSource {
             origin: safe_url(&source.page)?,
             same_origin: source.same_origin,
             interval: Duration::from_millis(config.min_request_interval_ms),
+            timeout: Duration::from_secs(config.timeout_seconds),
             max_requests: config.max_requests,
             gate: Mutex::new(Gate {
                 count: 0,
@@ -76,6 +78,9 @@ impl HttpSource {
         value: &str,
         cancelled: &AtomicBool,
     ) -> Result<(ureq::http::Response<ureq::Body>, Url)> {
+        let deadline = Instant::now()
+            .checked_add(self.timeout)
+            .ok_or_else(|| anyhow::anyhow!("timeout too large"))?;
         let mut url = safe_url(value)?;
         for hop in 0..=5 {
             ensure!(
@@ -92,9 +97,12 @@ impl HttpSource {
                     self.max_requests.is_none_or(|n| gate.count < n),
                     "request limit reached"
                 );
-                wait_until(gate.next, cancelled)?;
+                wait_until(gate.next.min(deadline), cancelled)?;
+                ensure!(Instant::now() < deadline, "request pacing timeout");
                 gate.count += 1;
-                gate.next = Instant::now() + self.interval;
+                gate.next = Instant::now()
+                    .checked_add(self.interval)
+                    .ok_or_else(|| anyhow::anyhow!("request interval too large"))?;
             }
             let response = self
                 .agent

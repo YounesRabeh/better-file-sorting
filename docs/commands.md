@@ -209,3 +209,8 @@ full hashes after explicit unlocking. Simultaneous download writers are locked o
 
 Exit codes: 0 success (including intentional policy filtering), 2 mixed success and
 incomplete/failed work, 1 failure without success. Budget-blocked work is incomplete.
+
+At an aggregate byte/staging cap, unknown-length responses fail closed if EOF
+cannot be verified without another read. Leave budget headroom for such servers.
+All completed receipted payloads must be explicitly unlocked before implicit
+receipt-driven ingest; it does not select a subset of completion receipts.

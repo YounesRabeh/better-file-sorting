@@ -122,8 +122,8 @@ bfs download --config collection.toml --dry-run
 bfs download --config collection.toml
 ```
 
-Downloads have `0000` permissions. Explicitly unlock only the receipt-owned ZIPs
-you want to ingest, using their paths in the download report/control receipts:
+Downloads have `0000` permissions. Explicitly unlock all receipt-owned ZIPs
+before ingestion, using their paths in the download report/control receipts:
 
 ```sh
 chmod 600 ./collection/downloads/payloads/TITLE/FILE.zip

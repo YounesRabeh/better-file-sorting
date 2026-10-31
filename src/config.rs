@@ -161,13 +161,13 @@ impl Config {
         if let Some(v) = args.recursive {
             c.recursive = v;
         }
-        if c.inputs.is_empty() {
-            if let Some(download) = &c.download {
-                for input in crate::acquisition::completed_inputs(download)? {
-                    c.remote_inputs
-                        .insert(input.path.clone(), input.receipt.candidate);
-                    c.inputs.push(input.path);
-                }
+        if c.inputs.is_empty()
+            && let Some(download) = &c.download
+        {
+            for input in crate::acquisition::completed_inputs(download)? {
+                c.remote_inputs
+                    .insert(input.path.clone(), input.receipt.candidate);
+                c.inputs.push(input.path);
             }
         }
         c.validate()?;
