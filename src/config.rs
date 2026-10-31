@@ -110,7 +110,7 @@ impl Default for Config {
             remote_inputs: Default::default(),
             source: None,
             download: None,
-            input_mode: InputMode::Archives,
+            input_mode: InputMode::Files,
             zip: false,
             zip_dirs: vec![],
             zip_each_dir: false,
@@ -130,22 +130,42 @@ impl Default for Config {
 impl Config {
     /// Load TOML configuration from an optional path.
     pub fn load(path: Option<&Path>) -> Result<Self> {
-        match path {
-            Some(path) => {
-                toml::from_str(&fs::read_to_string(path).context("cannot read configuration")?)
-                    .map_err(|_| {
-                        Error::Config("invalid TOML, unknown field, or unsupported value".into())
-                            .into()
-                    })
+        let selected = Self::active_path(path);
+        let Some(path) = selected else {
+            return Ok(Self::default());
+        };
+        let text = fs::read_to_string(&path).with_context(|| {
+            if !path.exists() {
+                format!("configuration file not found: {}\nHint: check the path or run without -c to use defaults.", path.display())
+            } else {
+                format!("cannot read configuration: {} (check permissions)", path.display())
             }
-            None => Ok(Self::default()),
-        }
+        })?;
+        toml::from_str(&text)
+            .map_err(|mut error: toml::de::Error| {
+                error.set_input(None);
+                error
+            })
+            .with_context(|| format!("invalid configuration: {}", path.display()))
     }
+
+    /// Only the current directory is searched; relative paths remain relative to cwd.
+    pub fn active_path(path: Option<&Path>) -> Option<PathBuf> {
+        path.map(Path::to_path_buf).or_else(|| {
+            Path::new("bfs.toml")
+                .exists()
+                .then(|| PathBuf::from("bfs.toml"))
+        })
+    }
+
     /// Merge CLI ingest overrides into file or default configuration.
     pub fn for_ingest(args: &Ingest) -> Result<Self> {
         let mut c = Self::load(args.config.as_deref())?;
         if let Some(mode) = args.input_mode {
             c.input_mode = mode;
+        }
+        if args.extract {
+            c.input_mode = InputMode::Archives;
         }
         if args.zip {
             c.zip = true;
@@ -183,7 +203,7 @@ impl Config {
         if let Some(v) = args.recursive {
             c.recursive = v;
         }
-        if c.inputs.is_empty() && c.download.is_none() && args.config.is_none() {
+        if c.inputs.is_empty() && c.download.is_none() {
             let download = crate::acquisition::DownloadConfig::default();
             if download.staging_dir.join("control").try_exists()? {
                 c.download = Some(download);
@@ -206,6 +226,15 @@ impl Config {
     /// Validate worker, security, output, and extraction-limit settings.
     pub fn validate(&self) -> Result<()> {
         let error = |s: &str| Error::Config(s.into());
+        if let Some(source) = &self.source {
+            if !source.page.is_empty() {
+                crate::http_source::safe_url(&source.page)?;
+            }
+            crate::acquisition::parse_bytes(&source.max_page_size)?;
+        }
+        if let Some(download) = &self.download {
+            download.validate()?;
+        }
         if self.output_password_file.is_some() && !self.zip_enabled() {
             return Err(error("output_password_file requires ZIP output").into());
         }

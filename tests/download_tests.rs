@@ -14,7 +14,7 @@ fn dry_run_never_creates_staging() {
         ..Default::default()
     };
     let inventory = Inventory {
-        version: 1,
+        version: 2,
         candidates: vec![],
     };
     assert_eq!(
@@ -35,6 +35,14 @@ fn transfer_with_speed(
     limit: &str,
     speed: Option<String>,
 ) -> (tempfile::TempDir, DownloadConfig, DownloadReport) {
+    transfer_response(body, limit, speed, true)
+}
+fn transfer_response(
+    body: &'static [u8],
+    limit: &str,
+    speed: Option<String>,
+    known_length: bool,
+) -> (tempfile::TempDir, DownloadConfig, DownloadReport) {
     use std::{
         io::{Read, Write},
         net::TcpListener,
@@ -47,20 +55,22 @@ fn transfer_with_speed(
         let (mut stream, _) = server.accept().unwrap();
         let mut request = [0; 4096];
         assert!(stream.read(&mut request).unwrap() > 0);
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        )
-        .unwrap();
+        if known_length {
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+        } else {
+            write!(stream, "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n").unwrap();
+        }
         let _ = stream.write_all(body);
     });
     let candidate = Candidate {
         source_id: bfs::metadata::digest(url.as_bytes()),
         url: url.clone(),
-        title: "Test".into(),
         name: "a.zip".into(),
-        discovered_at: "2026-10-31T00:00:00Z".into(),
     };
     let config = DownloadConfig {
         staging_dir: root.path().join("downloads"),
@@ -76,7 +86,7 @@ fn transfer_with_speed(
             ..Default::default()
         },
         &Inventory {
-            version: 1,
+            version: 2,
             candidates: vec![candidate],
         },
         &AtomicBool::new(false),
@@ -90,6 +100,7 @@ fn downloaded_payload_is_sealed_and_receipted() {
     use std::os::unix::fs::PermissionsExt;
     let (_root, config, report) = transfer(b"fixture", "1 KB");
     assert_eq!(report.downloaded, 1, "{:?}", report.errors);
+    assert_eq!(report.bytes, 7);
     let path = config
         .staging_dir
         .join(download::payload_path(&config, &report.candidates[0]));
@@ -175,14 +186,12 @@ fn downloaded_zip_flows_through_existing_ingest() {
 }
 
 #[test]
-fn unicode_titles_fit_filesystem_component_limits() {
+fn unicode_names_fit_filesystem_component_limits() {
     let config = DownloadConfig::default();
     let candidate = Candidate {
         source_id: "a".repeat(64),
         url: "http://localhost/a.zip".into(),
-        title: "界".repeat(100),
         name: format!("{}.zip", "界".repeat(100)),
-        discovered_at: String::new(),
     };
     let path = download::payload_path(&config, &candidate);
     assert!(path.components().all(|c| c.as_os_str().len() <= 255));
@@ -201,11 +210,10 @@ fn final_chunk_pacing_cannot_publish_after_timeout() {
 }
 
 #[test]
-fn changed_link_title_reuses_completed_source() {
+fn completed_source_is_cached() {
     use std::sync::atomic::AtomicBool;
     let (_root, config, report) = transfer(b"fixture", "1 KB");
-    let mut candidate = report.candidates[0].clone();
-    candidate.title = "New title".into();
+    let candidate = report.candidates[0].clone();
     let source = SourceConfig {
         page: candidate.url.clone(),
         ..Default::default()
@@ -214,7 +222,7 @@ fn changed_link_title_reuses_completed_source() {
         &config,
         &source,
         &Inventory {
-            version: 1,
+            version: 2,
             candidates: vec![candidate],
         },
         &AtomicBool::new(false),
@@ -222,4 +230,121 @@ fn changed_link_title_reuses_completed_source() {
     .unwrap();
     assert_eq!(result.cached, 1);
     assert_eq!(result.downloaded, 0);
+}
+
+#[test]
+fn filename_templates_keep_extension_once_and_reject_invalid_templates() {
+    let candidate = Candidate {
+        source_id: "a".repeat(64),
+        url: "http://localhost/sample.tar.gz".into(),
+        name: "sample.tar.gz".into(),
+    };
+    for (template, expected) in [
+        ("{original_name}", "sample.tar.gz".to_string()),
+        (
+            "{name}-{source_id}",
+            format!("sample.tar-{}.gz", candidate.source_id),
+        ),
+        ("{source_id}", format!("{}.gz", candidate.source_id)),
+    ] {
+        let config = DownloadConfig {
+            filename: template.into(),
+            directory: "daily".into(),
+            ..Default::default()
+        };
+        config.validate().unwrap();
+        assert_eq!(
+            download::payload_path(&config, &candidate),
+            std::path::Path::new("payloads/daily").join(expected)
+        );
+        assert_eq!(candidate.name, "sample.tar.gz");
+    }
+    for filename in ["{name}", "{original_name}.zip", "../x", ""] {
+        assert!(
+            DownloadConfig {
+                filename: filename.into(),
+                ..Default::default()
+            }
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("download.filename")
+        );
+    }
+}
+
+#[test]
+fn unsafe_names_are_single_portable_components() {
+    let config = DownloadConfig::default();
+    for name in [
+        "../../evil.zip",
+        "CON.zip",
+        "NUL",
+        "back\\slash.zip",
+        "x\u{202e}gpj.zip",
+        "bad\nname.zip",
+        ".",
+        "x. ",
+    ] {
+        let candidate = Candidate {
+            source_id: "a".repeat(64),
+            url: String::new(),
+            name: name.into(),
+        };
+        let path = download::payload_path(&config, &candidate);
+        assert_eq!(path.components().count(), 2, "{path:?}");
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        assert!(!filename.ends_with(['.', ' ']));
+        assert!(!filename.contains(['\\', '\n', '\u{202e}']));
+        assert_ne!(filename, "CON.zip");
+        assert_ne!(filename, "NUL");
+    }
+}
+
+#[test]
+fn duplicate_output_names_fail_before_staging_is_created() {
+    let root = tempfile::tempdir().unwrap();
+    let config = DownloadConfig {
+        staging_dir: root.path().join("absent"),
+        ..Default::default()
+    };
+    let inventory = Inventory {
+        version: 2,
+        candidates: ["http://localhost/a/same.zip", "http://localhost/b/same.zip"]
+            .into_iter()
+            .map(|url| Candidate {
+                source_id: bfs::metadata::digest(url.as_bytes()),
+                url: url.into(),
+                name: "same.zip".into(),
+            })
+            .collect(),
+    };
+    assert!(
+        download::run(
+            &config,
+            &SourceConfig {
+                page: "http://localhost/".into(),
+                ..Default::default()
+            },
+            &inventory,
+            &std::sync::atomic::AtomicBool::new(false)
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("collision")
+    );
+    assert!(!config.staging_dir.exists());
+    let config = DownloadConfig {
+        filename: "{name}-{source_id}".into(),
+        ..config
+    };
+    assert!(download::preview(&config, &inventory).is_ok());
+}
+
+#[test]
+fn unknown_length_transfers_count_actual_bytes() {
+    let (_root, _config, report) = transfer_response(b"unknown-size fixture", "1 KB", None, false);
+    assert_eq!(report.downloaded, 1, "{:?}", report.errors);
+    assert_eq!(report.bytes, 20);
+    assert_eq!(report.failed, 0);
 }

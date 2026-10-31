@@ -17,38 +17,34 @@ fn readable_sizes() {
 }
 
 #[test]
-fn policies_exclude_before_include_and_sort_titles() {
+fn policies_exclude_before_include_and_sort_names() {
     use bfs::acquisition::*;
     let config: DownloadConfig = toml::from_str(
         r#"
+        order_by = "name"
         [[policies]]
-        title_contains = "linux"
+        name_contains = "linux"
         action = "include"
         [[policies]]
-        title_contains = "old"
+        name_contains = "old"
         action = "exclude"
     "#,
     )
     .unwrap();
     let inventory = Inventory {
-        version: 1,
+        version: 2,
         candidates: ["Linux Z", "Windows", "OLD Linux", "linux A"]
             .into_iter()
             .map(|title| Candidate {
                 source_id: title.into(),
                 url: String::new(),
-                title: title.into(),
-                name: String::new(),
-                discovered_at: String::new(),
+                name: title.into(),
             })
             .collect(),
     };
     let selected = select_candidates(&inventory, &config).unwrap();
     assert_eq!(
-        selected
-            .iter()
-            .map(|c| c.title.as_str())
-            .collect::<Vec<_>>(),
+        selected.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
         ["linux A", "Linux Z"]
     );
 }

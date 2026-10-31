@@ -27,8 +27,6 @@
 
 ---
 
-## Features
-
 - 📁 Sort ordinary files and folders, or extract entries from ZIP collections.
 - 📋 Define matching rules, destination paths, filenames, and duplicate handling in TOML.
 - 🔗 Deduplicate content with SHA-256 while retaining source metadata.
@@ -116,11 +114,10 @@ runs. Already-compressed files may shrink little or produce a larger ZIP.
 For the default workflow, no configuration file is required:
 
 ```sh
-bfs discover https://example.org/downloads/
-bfs download --dry-run
-bfs download
-# Explicitly unlock the completed receipt-owned payloads before ingestion.
-bfs ingest
+bfs collect https://example.org/downloads/ --dry-run
+bfs collect https://example.org/downloads/
+# Explicitly unlock the completed receipt-owned payloads before extraction.
+bfs ingest --extract
 bfs stats
 ```
 
@@ -144,7 +141,7 @@ bfs download --config collection.toml
 > before ingestion, using their paths in the download report/control receipts:
 
 ```sh
-chmod 600 ./collection/downloads/payloads/TITLE/FILE.zip
+chmod 600 ./collection/downloads/payloads/FILE.zip
 bfs ingest --config collection.toml --dry-run
 bfs ingest --config collection.toml
 ```
@@ -155,7 +152,7 @@ are retained; BFS never automatically unseals or deletes them. After unlocking,
 `download` intentionally refuses reuse until you explicitly reseal the files
 with `chmod 000`. Sealing is a file-permission safeguard, not a sandbox.
 
-Title means visible link text; date ordering uses discovery time. Policies choose
+Policies match original filenames case-insensitively and choose
 which ZIPs to download and stage; existing sorting rules organize their contents.
 See [acquisition configuration](docs/commands.md#acquisition-commands) for limits.
 
@@ -167,7 +164,7 @@ for every argument, default, report field, and exit code.
 
 ### Files, archives, and repositories
 
-Use `--input-mode files` for ordinary folders. The default input mode searches
+Use `--extract` for archive contents. Archive input mode searches
 for ZIP archives and extracts their entries; ZIPs are treated as ordinary files
 when file mode is selected.
 
@@ -179,8 +176,8 @@ when file mode is selected.
 | Show all ingest options | `bfs ingest --help` |
 | Sort ordinary files into a readable private repository | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --output ./organized --security-mode standard` |
 | Inspect ZIP metadata without extracting contents | `bfs inspect ./incoming` |
-| Ingest ZIP entries into a sealed repository | `bfs ingest ./incoming --rules ./rules.example.toml --output ./samples` |
-| Preview destinations before ingest | `bfs ingest ./incoming --rules ./rules.example.toml --output ./samples --dry-run` |
+| Ingest ZIP entries into a sealed repository | `bfs ingest ./incoming --extract --rules ./rules.example.toml --output ./samples` |
+| Preview destinations before ingest | `bfs ingest ./incoming --extract --rules ./rules.example.toml --output ./samples --dry-run` |
 | Show repository statistics | `bfs stats ./organized` |
 | Preview new rules for an existing repository | `bfs reorganize ./organized --rules ./rules.toml --dry-run` |
 | Publish a new view with updated rules | `bfs reorganize ./organized --rules ./rules.toml` |
@@ -215,7 +212,7 @@ exactly one nonempty line. Password files and their hard links are excluded from
 | Create one ZIP per top-level sorted directory | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip-each-dir --output ./exports` |
 | Create separate ZIPs for selected directories | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip-dir documents/pdf --zip-dir text --zip-each-dir --output ./exports` |
 | Encrypt the output ZIP with AES-256 | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip --output ./private.zip --output-password-file ./output-password.txt` |
-| Decrypt archive inputs and export their sorted contents | `bfs ingest ./incoming --password-file ./input-passwords.txt --rules ./rules.example.toml --zip --output ./sorted.zip` |
+| Decrypt archive inputs and export their sorted contents | `bfs ingest ./incoming --extract --password-file ./input-passwords.txt --rules ./rules.example.toml --zip --output ./sorted.zip` |
 | Select temporary storage for ZIP output | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip --output ./sorted.zip --staging-dir /existing/scratch` |
 
 </details>

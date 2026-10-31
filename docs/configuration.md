@@ -23,7 +23,7 @@ configuration file's directory. Examples are editable presets, not a list of def
 | Runtime root | Input paths/mode, output, ingest workers, ZIP export, passwords, rule-file path | Download concurrency or per-site pacing |
 | `[source]` | One HTML page, same-origin restrictions, maximum page size | Recursive crawling or file-transfer servers |
 | `[download]` | Payload staging, ordering, concurrency, transfer budgets and pacing | Extracted-content destinations or extraction limits |
-| `[[download.policies]]` | Which downloadable ZIPs are included/excluded by title or name | Which entries inside a ZIP are selected by sorting rules |
+| `[[download.policies]]` | Which downloadable ZIPs are included/excluded by filename | Which entries inside a ZIP are selected by sorting rules |
 | `[security]` | Repository permission mode and required safeguards | Automatic unlocking of downloaded payloads |
 | `[limits]` | Compressed input, expanded entry/archive, count and expansion-ratio limits | Network speed or download budgets |
 | Rules `[organization]` | Filename policy, duplicate handling, view type and fallback templates | Acquisition of remote files |
@@ -47,7 +47,7 @@ Network body reads currently share a budget lock, which can limit throughput.
 | TOML key | CLI override | Meaning / accepted values |
 | --- | --- | --- |
 | `inputs` | Positional input paths | Explicit CLI paths replace configured paths; if neither is set, ingest can use download receipts |
-| `input_mode` | `--input-mode` | `archives` (default) extracts ZIPs; `files` keeps ZIPs as ordinary files |
+| `input_mode` | `--input-mode` | `files` (default) keeps ZIPs as ordinary files; `archives` or CLI `--extract` extracts contents |
 | `output` | `--output` | Repository directory, new ZIP filename, or new separate-export directory |
 | `rules` | `--rules` | Sorting policy path; does not load runtime configuration |
 | `recursive` | `--recursive true/false` | Whether local discovery includes nested folders; default `true` |
@@ -62,6 +62,17 @@ Network body reads currently share a budget lock, which can limit throughput.
 Root `staging_dir` is temporary ingest scratch. `[download].staging_dir` is the
 persistent download area. They serve different purposes and need not be the same.
 CLI values override runtime TOML, then built-in defaults supply omitted settings.
+Without `-c`, only `./bfs.toml` is loaded if present; no parent directories are searched.
+An explicit missing config is an error. `--verbose` prints the active path.
+Both `organize` and `ingest` default to files.
+
+`[download].filename` supports exactly `{original_name}` (default), `{name}-{source_id}`,
+and `{source_id}`. Extensions appear once. `[download].directory` is a literal relative
+folder beneath `staging_dir/payloads`, empty by default. Filename collisions fail
+before payload writes; choose an ID template to disambiguate. `order_by = "source"`
+is the default, with optional `"name"` affecting execution only. Policies use
+`name_contains` and include/exclude actions. Old acquisition inventories/receipts
+are rejected; explicitly start a fresh root with `bfs collect URL -o collection-new`.
 
 ## Sizes, rates and extraction limits
 
@@ -134,7 +145,7 @@ working-directory/
 │   ├── inventory.jsonl             # Discovery inventory (versioned JSON)
 │   └── downloads/
 │       ├── control/                # Download lock and completion receipts
-│       └── payloads/               # Sealed downloaded ZIPs grouped by title
+│       └── payloads/               # Sealed downloaded ZIPs in literal configured folders
 └── organized/                      # Default managed BFS repository
     ├── security.json
     ├── .lock

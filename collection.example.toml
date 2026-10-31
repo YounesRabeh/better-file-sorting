@@ -1,6 +1,7 @@
 # The limits below are an opt-in bounded preset; bare bfs download has no byte/count caps.
 # WEB COLLECTION — discover ZIP links, download sealed payloads, then ingest.
-# Usage: bfs discover --config collection.toml; bfs download --config collection.toml
+# Usage: bfs collect -c collection.toml
+# --dry-run may request HTML metadata, but never downloads payloads.
 # Explicitly unlock completed payloads before bfs ingest --config collection.toml.
 # No inputs field: ingest uses verified completion receipts.
 # Reference: docs/configuration.md and docs/commands.md#acquisition-commands.
@@ -50,22 +51,26 @@ timeout_seconds = 300
 # min_request_interval_ms = 1000
 # Maximum HTTP requests per command invocation, including redirects; omit for no cap.
 # max_requests = 100
-# Prioritize downloads by title, name, or date (UTC discovery time, not publication date).
-order_by = "title"
+# Preserve website order; use "name" only to change download execution priority.
+order_by = "source"
 # Sort download priority in ascending or descending order before selecting candidates.
 order = "ascending"
-# Staging subdirectory template: {title}, {name}, or a safe literal relative directory.
-directory = "{title}"
+# Literal relative folder beneath staging_dir/payloads; empty uses payloads directly.
+directory = "malware-bazaar-daily"
+# Download basenames only; discovery always lists original names.
+filename = "{original_name}"
+# filename = "{name}-{source_id}"
+# filename = "{source_id}"
 
 # Download selection policies (not extracted-content sorting rules)
 # Exclusions win; when includes exist, at least one must match.
 # [[download.policies]]
-# Match visible link titles case-insensitively; exclusions override matching includes.
-# title_contains = "Linux"
+# Match original resource filenames case-insensitively.
+# name_contains = "Linux"
 # Include or exclude matching downloads; if include policies exist, at least one must match.
 # action = "include"
 # [[download.policies]]
-# Match resource filenames case-insensitively; use either this or title_contains per policy.
+# Match resource filenames case-insensitively; one match per policy.
 # name_contains = "deprecated"
 # Include or exclude matching downloads; if include policies exist, at least one must match.
 # action = "exclude"

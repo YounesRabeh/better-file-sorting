@@ -9,7 +9,7 @@
 /// Maximum body read chunk, also bounding the speed limiter burst.
 const TRANSFER_BUFFER_BYTES: usize = 16 * 1024;
 /// Maximum sanitized label length, leaving room for the source hash and extension.
-const MAX_LABEL_CHARS: usize = 80;
+const MAX_FILENAME_BYTES: usize = 240;
 
 use crate::{
     acquisition::*,
@@ -33,41 +33,95 @@ use std::{
 
 pub fn preview(config: &DownloadConfig, inventory: &Inventory) -> Result<DownloadReport> {
     let candidates = select_candidates(inventory, config)?;
+    use unicode_normalization::UnicodeNormalization;
+    let mut paths = std::collections::BTreeSet::new();
+    for candidate in &candidates {
+        ensure!(
+            crate::storage::valid_hash(&candidate.source_id)
+                && candidate.source_id == crate::metadata::digest(candidate.url.as_bytes()),
+            "invalid source identity"
+        );
+        crate::http_source::safe_url(&candidate.url)?;
+        let path = payload_path(config, candidate);
+        ensure!(
+            paths.insert(
+                path.to_string_lossy()
+                    .nfc()
+                    .collect::<String>()
+                    .to_lowercase()
+            ),
+            "download destination collision for {}; choose filename = '{{name}}-{{source_id}}' or '{{source_id}}'",
+            crate::presentation::safe_text(&candidate.name)
+        );
+    }
     Ok(DownloadReport {
         filtered: inventory.candidates.len() - candidates.len(),
         candidates,
         ..Default::default()
     })
 }
-fn safe_component(text: &str) -> String {
-    let value: String = text
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .take(MAX_LABEL_CHARS)
-        .collect();
-    if value.is_empty() {
-        "download".into()
-    } else {
-        format!("item_{value}")
+pub(crate) fn safe_component(text: &str, limit: usize) -> String {
+    let mut value = String::new();
+    for c in text.chars() {
+        let c = if c.is_alphanumeric()
+            || (c.is_ascii_graphic()
+                && !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'))
+            || c == ' '
+        {
+            c
+        } else {
+            '_'
+        };
+        if value.len() + c.len_utf8() > limit {
+            break;
+        }
+        value.push(c);
     }
+    let mut value = value.trim_matches(['.', ' ']).to_string();
+    if value.is_empty() {
+        value.push_str("download");
+    }
+    let stem = value.split('.').next().unwrap().to_ascii_uppercase();
+    if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+        || ["COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³"].contains(&stem.as_str())
+    {
+        value.insert(0, '_');
+    }
+    value
 }
 pub fn payload_path(config: &DownloadConfig, candidate: &Candidate) -> PathBuf {
-    let directory = match config.directory.as_str() {
-        "{title}" => safe_component(&candidate.title),
-        "{name}" => safe_component(&candidate.name),
-        _ => config.directory.clone(),
+    let (raw_stem, raw_extension) = candidate
+        .name
+        .rsplit_once('.')
+        .filter(|(stem, extension)| !stem.is_empty() && !extension.is_empty())
+        .map_or((candidate.name.as_str(), None), |(stem, ext)| {
+            (stem, Some(ext))
+        });
+    let extension = raw_extension
+        .map(|ext| format!(".{}", safe_component(ext, 80)))
+        .unwrap_or_default();
+    let stem = safe_component(raw_stem, MAX_FILENAME_BYTES - extension.len() - 1);
+    let original = format!("{stem}{extension}");
+    let id = safe_component(&candidate.source_id, 64);
+    let filename = match config.filename.as_str() {
+        "{source_id}" => format!("{id}{extension}"),
+        "{name}-{source_id}" => {
+            let stem = safe_component(
+                &stem,
+                MAX_FILENAME_BYTES
+                    .saturating_sub(id.len() + extension.len() + 1)
+                    .max(8),
+            );
+            format!("{stem}-{id}{extension}")
+        }
+        _ => original,
     };
-    PathBuf::from("payloads").join(directory).join(format!(
-        "{}-{}.zip",
-        safe_component(candidate.name.trim_end_matches(".zip")),
-        candidate.source_id
-    ))
+    PathBuf::from("payloads")
+        .join(&config.directory)
+        .join(filename)
 }
 fn receipt_path(config: &DownloadConfig, id: &str) -> PathBuf {
     config
@@ -92,6 +146,8 @@ struct Budget {
     transferred: u64,
     staged: u64,
     pace: Instant,
+    completed: usize,
+    failed: usize,
 }
 pub fn run(
     config: &DownloadConfig,
@@ -128,6 +184,8 @@ pub fn run(
         transferred: 0,
         staged: staged_bytes(&payloads)?,
         pace: Instant::now(),
+        completed: 0,
+        failed: 0,
     });
     ensure!(
         budget.lock().unwrap().staged <= staging_limit,
@@ -137,10 +195,12 @@ pub fn run(
     for candidate in &report.candidates {
         let receipt = receipt_path(config, &candidate.source_id);
         if receipt.try_exists()? {
-            let saved: DownloadReceipt = load_json(&receipt)?;
+            let saved = load_receipt(&receipt)?;
             ensure!(
-                saved.version == 1
+                saved.version == 2
                     && saved.candidate.source_id == candidate.source_id
+                    && saved.candidate.url == candidate.url
+                    && crate::storage::valid_hash(&saved.sha256)
                     && saved.path == payload_path(config, &saved.candidate),
                 "invalid download receipt"
             );
@@ -152,11 +212,25 @@ pub fn run(
             );
             report.cached += 1;
         } else if work.len() < config.max_files {
+            let target = config.staging_dir.join(payload_path(config, candidate));
+            crate::discovery::check_path(&target)?;
+            ensure!(
+                !target.try_exists()?,
+                "download destination collision: {}; existing content retained",
+                target.display()
+            );
             work.push(candidate.clone());
         } else {
             report.not_attempted += 1;
         }
     }
+    let progress = crate::presentation::Progress::new(None, "Collecting");
+    let selected = report.candidates.len();
+    budget.lock().unwrap().completed = report.cached;
+    progress.0.set_message(format!(
+        "{}/{} files, 0 failed, 0 bytes",
+        report.cached, selected
+    ));
     let results = Mutex::new(vec![]);
     rayon::ThreadPoolBuilder::new()
         .num_threads(config.concurrency)
@@ -233,6 +307,27 @@ pub fn run(
                                 + Duration::from_secs_f64(n as f64 / rate as f64);
                             wait_until(b.pace.min(started + timeout), cancelled)?;
                         }
+                        let current = if config.concurrency == 1 {
+                            match expected.filter(|length| *length > 0) {
+                                Some(length) => format!(
+                                    "{}: {:.0}% ({}/{length} bytes); ",
+                                    crate::presentation::safe_text(&candidate.name),
+                                    (size + n as u64) as f64 * 100.0 / length as f64,
+                                    size + n as u64
+                                ),
+                                None => format!(
+                                    "{}: {} bytes; ",
+                                    crate::presentation::safe_text(&candidate.name),
+                                    size + n as u64
+                                ),
+                            }
+                        } else {
+                            String::new()
+                        };
+                        progress.0.set_message(format!(
+                            "{current}{}/{} files, {} failed, {} bytes",
+                            b.completed, selected, b.failed, b.transferred
+                        ));
                         drop(b);
                         size += n as u64;
                         hash.update(&buffer[..n]);
@@ -240,12 +335,16 @@ pub fn run(
                     }
                     ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
                     ensure!(started.elapsed() < timeout, "transfer timeout");
+                    ensure!(
+                        expected.is_none_or(|length| length == size),
+                        "download Content-Length mismatch"
+                    );
                     file.as_file().sync_all()?;
                     let path = file.into_temp_path();
                     path.persist_noclobber(&target)?;
                     File::open(target.parent().unwrap())?.sync_all()?;
                     let receipt = DownloadReceipt {
-                        version: 1,
+                        version: 2,
                         candidate: candidate.clone(),
                         path: relative,
                         size,
@@ -254,10 +353,21 @@ pub fn run(
                     save_json(&receipt_path(config, &candidate.source_id), &receipt)?;
                     Ok(())
                 })();
-                results
-                    .lock()
-                    .unwrap()
-                    .push(result.map_err(|e| format!("{}: {e}", candidate.source_id)));
+                {
+                    let mut b = budget.lock().unwrap();
+                    if result.is_ok() {
+                        b.completed += 1;
+                    } else {
+                        b.failed += 1;
+                    }
+                    progress.0.set_message(format!(
+                        "{}/{} files, {} failed, {} bytes",
+                        b.completed, selected, b.failed, b.transferred
+                    ));
+                }
+                results.lock().unwrap().push(result.map_err(|e| {
+                    format!("{}: {e:#}", crate::presentation::safe_text(&candidate.name))
+                }));
             })
         });
     for result in results.into_inner().unwrap() {
@@ -269,5 +379,6 @@ pub fn run(
             }
         }
     }
+    report.bytes = budget.into_inner().unwrap().transferred;
     Ok(report)
 }

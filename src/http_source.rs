@@ -12,9 +12,9 @@ const MAX_REDIRECTS: usize = 5;
 const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 use crate::acquisition::*;
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use std::{
-    collections::BTreeMap,
+    collections::BTreeSet,
     io::Read,
     sync::{
         Mutex,
@@ -121,7 +121,7 @@ impl HttpSource {
                 .get(url.as_str())
                 .header("Accept-Encoding", "identity")
                 .call()
-                .map_err(|_| anyhow::anyhow!("HTTP request failed"))?;
+                .context("HTTP request failed; check connectivity, server availability, and download.timeout_seconds")?;
             if response.status().as_u16() == 429 {
                 self.gate
                     .lock()
@@ -170,6 +170,26 @@ impl HttpSource {
         unreachable!()
     }
 }
+fn original_name(encoded: &str) -> String {
+    let mut bytes = Vec::with_capacity(encoded.len());
+    let mut input = encoded.as_bytes().iter().copied();
+    while let Some(byte) = input.next() {
+        if byte == b'%' {
+            let decoded = input
+                .next()
+                .and_then(|a| (a as char).to_digit(16))
+                .zip(input.next().and_then(|b| (b as char).to_digit(16)));
+            let Some((a, b)) = decoded else {
+                return encoded.into();
+            };
+            bytes.push((a * 16 + b) as u8);
+        } else {
+            bytes.push(byte);
+        }
+    }
+    String::from_utf8(bytes).unwrap_or_else(|_| encoded.into())
+}
+
 pub fn parse_links(config: &SourceConfig, final_url: &str, html: &str) -> Result<Inventory> {
     let origin = safe_url(&config.page)?;
     let page = safe_url(final_url)?;
@@ -185,8 +205,8 @@ pub fn parse_links(config: &SourceConfig, final_url: &str, html: &str) -> Result
         })
         .unwrap_or(page);
     let selector = scraper::Selector::parse("a[href]").unwrap();
-    let mut candidates = BTreeMap::new();
-    let date = chrono::Utc::now().to_rfc3339();
+    let mut candidates = Vec::new();
+    let mut seen = BTreeSet::new();
     for element in document.select(&selector) {
         let Ok(url) = base.join(element.value().attr("href").unwrap()) else {
             continue;
@@ -200,34 +220,24 @@ pub fn parse_links(config: &SourceConfig, final_url: &str, html: &str) -> Result
         if !url.path().to_lowercase().ends_with(".zip") {
             continue;
         }
-        let name = url
-            .path_segments()
-            .and_then(|mut p| p.next_back())
-            .unwrap_or("download.zip")
-            .to_string();
-        let title = element
-            .text()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let name = original_name(
+            url.path_segments()
+                .and_then(|mut p| p.next_back())
+                .unwrap_or("download.zip"),
+        );
+        if !seen.insert(url.to_string()) {
+            continue;
+        }
         let source_id = crate::metadata::digest(url.as_str().as_bytes());
-        candidates.entry(source_id.clone()).or_insert(Candidate {
+        candidates.push(Candidate {
             source_id,
             url: url.to_string(),
-            title: if title.is_empty() {
-                name.clone()
-            } else {
-                title
-            },
             name,
-            discovered_at: date.clone(),
         });
     }
     Ok(Inventory {
-        version: 1,
-        candidates: candidates.into_values().collect(),
+        version: 2,
+        candidates,
     })
 }
 pub fn discover(

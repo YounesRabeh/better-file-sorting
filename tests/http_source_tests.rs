@@ -7,14 +7,14 @@
 
 use bfs::{acquisition::SourceConfig, http_source::parse_links};
 #[test]
-fn links_are_resolved_deduplicated_and_titled() {
+fn links_are_resolved_and_first_url_keeps_dom_order() {
     let config = SourceConfig {
         page: "http://localhost/index".into(),
         ..Default::default()
     };
     let result = parse_links(&config, &config.page, r#"<a href='/a.ZIP#one'>Linux &amp; tools</a><a href='/a.ZIP#two'>Duplicate</a><a href='other.txt'>No</a><a href='http://elsewhere/b.zip'>Other</a>"#).unwrap();
     assert_eq!(result.candidates.len(), 1);
-    assert_eq!(result.candidates[0].title, "Linux & tools");
+    assert_eq!(result.candidates[0].name, "a.ZIP");
     assert_eq!(result.candidates[0].url, "http://localhost/a.ZIP");
 }
 
@@ -40,7 +40,7 @@ fn discovery_reads_local_http_page_and_limits_redirect_requests() {
     };
     let result =
         bfs::http_source::discover(&source, &Default::default(), &AtomicBool::new(false)).unwrap();
-    assert_eq!(result.candidates[0].title, "Fixture");
+    assert_eq!(result.candidates[0].name, "a.zip");
     handle.join().unwrap();
 }
 
@@ -150,7 +150,7 @@ fn discover_url_cli_writes_default_inventory_without_config() {
     let inventory =
         bfs::acquisition::load_inventory(&temp.path().join("collection/inventory.jsonl")).unwrap();
     assert_eq!(inventory.candidates.len(), 1);
-    assert_eq!(inventory.candidates[0].title, "Fixture ZIP");
+    assert_eq!(inventory.candidates[0].name, "fixture.zip");
 }
 
 #[test]
@@ -224,4 +224,57 @@ fn default_workflow_needs_no_config_file() {
     assert!(temp.path().join("organized/security.json").is_file());
     run(&["stats"]);
     run(&["reorganize", "--dry-run"]);
+}
+
+#[test]
+fn discovery_keeps_dom_order_and_download_priority_is_separate() {
+    use bfs::acquisition::*;
+    let source = SourceConfig {
+        page: "http://localhost/".into(),
+        ..Default::default()
+    };
+    let inventory = parse_links(&source, &source.page, r#"<a href='z.zip'>Title</a><div><a href='a.zip'>Nested</a></div><a href='z.zip#again'>Duplicate</a><a href='other/a.zip'>Same name</a><a href='http://['>Bad</a>"#).unwrap();
+    let names = || {
+        inventory
+            .candidates
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(), ["z.zip", "a.zip", "a.zip"]);
+    assert_eq!(
+        select_candidates(&inventory, &DownloadConfig::default()).unwrap()[0].name,
+        "z.zip"
+    );
+    let config = DownloadConfig {
+        order_by: OrderBy::Name,
+        ..Default::default()
+    };
+    assert_eq!(
+        select_candidates(&inventory, &config).unwrap()[0].name,
+        "a.zip"
+    );
+    assert_eq!(names(), ["z.zip", "a.zip", "a.zip"]);
+    let value = serde_json::to_value(&inventory).unwrap();
+    assert!(value["candidates"][0].get("title").is_none());
+    assert!(value["candidates"][0].get("discovered_at").is_none());
+}
+
+#[test]
+fn discovery_decodes_original_filename_without_trusting_link_title() {
+    let source = SourceConfig {
+        page: "http://localhost/".into(),
+        ..Default::default()
+    };
+    let inventory = parse_links(
+        &source,
+        &source.page,
+        "<a href='hello%20world%2B.zip'>../../wrong.zip</a>",
+    )
+    .unwrap();
+    assert_eq!(inventory.candidates[0].name, "hello world+.zip");
+    assert_eq!(
+        inventory.candidates[0].url,
+        "http://localhost/hello%20world%2B.zip"
+    );
 }

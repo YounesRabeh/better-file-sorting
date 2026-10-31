@@ -356,7 +356,8 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
         bytes: 0,
         first_failure: None,
     });
-    let progress = indicatif::ProgressBar::new(paths.len() as u64);
+    let progress =
+        crate::presentation::Progress::new(Some(paths.len() as u64), "Organizing inputs");
     let started = Instant::now();
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(config.workers)
@@ -475,6 +476,10 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                             metadata::append(&mut journal.manifest, &record)?;
                             journal.accepted += 1;
                             journal.bytes += item.size;
+                            progress.0.set_message(format!(
+                                "{} items; {} failed; {} bytes",
+                                journal.accepted, journal.failures, journal.bytes
+                            ));
                         }
                         Err(error) => {
                             journal
@@ -492,11 +497,20 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                     .map_err(|_| anyhow::anyhow!("journal lock poisoned"))?
                     .failure(path, None, &error)?;
             }
-            progress.inc(1);
+            {
+                let journal = journal
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("journal lock poisoned"))?;
+                progress.0.set_message(format!(
+                    "{} items; {} failed; {} bytes",
+                    journal.accepted, journal.failures, journal.bytes
+                ));
+            }
+            progress.0.inc(1);
             Ok(())
         })
     })?;
-    progress.finish_and_clear();
+    progress.0.finish_and_clear();
     let journal = journal
         .into_inner()
         .map_err(|_| anyhow::anyhow!("journal lock poisoned"))?;

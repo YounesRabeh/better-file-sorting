@@ -117,9 +117,8 @@ impl Default for SourceConfig {
 #[serde(rename_all = "snake_case")]
 pub enum OrderBy {
     #[default]
-    Title,
+    Source,
     Name,
-    Date,
 }
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -137,7 +136,6 @@ pub enum Action {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
-    pub title_contains: Option<String>,
     pub name_contains: Option<String>,
     pub action: Action,
 }
@@ -176,6 +174,8 @@ pub struct DownloadConfig {
     pub order: Order,
     /// Safe staging directory template; does not control extracted-content rules.
     pub directory: String,
+    /// Download basename policy; discovery always retains the original name.
+    pub filename: String,
     /// Include/exclude filters; exclusions take precedence.
     pub policies: Vec<Policy>,
 }
@@ -193,9 +193,10 @@ impl Default for DownloadConfig {
             max_speed: None,
             min_request_interval_ms: 0,
             max_requests: None,
-            order_by: OrderBy::Title,
+            order_by: OrderBy::Source,
             order: Order::Ascending,
-            directory: "{title}".into(),
+            directory: String::new(),
+            filename: "{original_name}".into(),
             policies: vec![],
         }
     }
@@ -233,22 +234,27 @@ impl DownloadConfig {
             "empty acquisition path"
         );
         for p in &self.policies {
-            ensure!(
-                p.title_contains.is_some() ^ p.name_contains.is_some(),
-                "policy requires exactly one match field"
-            );
+            ensure!(p.name_contains.is_some(), "policy requires name_contains");
         }
-        if !["{title}", "{name}"].contains(&self.directory.as_str()) {
-            ensure!(
-                !self.directory.is_empty()
-                    && self.directory.split('/').all(|c| !c.is_empty()
+        ensure!(
+            ["{original_name}", "{name}-{source_id}", "{source_id}"]
+                .contains(&self.filename.as_str()),
+            "download.filename must be {{original_name}}, {{name}}-{{source_id}}, or {{source_id}}"
+        );
+        ensure!(
+            self.directory.is_empty()
+                || self.directory.split('/').all(|c| {
+                    !c.is_empty()
                         && c != "."
                         && c != ".."
                         && !c.contains(['\\', ':', '{', '}'])
-                        && !c.chars().any(char::is_control)),
-                "unsafe download directory"
-            );
-        }
+                        && !c.chars().any(char::is_control)
+                        && c.len() <= 200
+                        && !c.ends_with(['.', ' '])
+                        && crate::download::safe_component(c, 200) == c
+                }),
+            "unsafe download.directory: use a literal relative folder"
+        );
         Ok(())
     }
 }
@@ -258,10 +264,7 @@ pub struct Candidate {
     /// Stable digest of the normalized resource URL, independent of local paths.
     pub source_id: String,
     pub url: String,
-    pub title: String,
     pub name: String,
-    /// UTC discovery timestamp, not a resource publication date.
-    pub discovered_at: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -281,6 +284,8 @@ pub struct DownloadReceipt {
 }
 #[derive(Debug, Default, Serialize)]
 pub struct DownloadReport {
+    /// Actual response body bytes read, including failed transfers.
+    pub bytes: u64,
     pub downloaded: usize,
     pub cached: usize,
     pub filtered: usize,
@@ -296,14 +301,9 @@ pub fn select_candidates(inventory: &Inventory, config: &DownloadConfig) -> Resu
         .iter()
         .filter(|c| {
             let matches = |p: &Policy| {
-                p.title_contains
-                    .as_ref()
-                    .map(|s| c.title.to_lowercase().contains(&s.to_lowercase()))
-                    .unwrap_or_else(|| {
-                        c.name
-                            .to_lowercase()
-                            .contains(&p.name_contains.as_ref().unwrap().to_lowercase())
-                    })
+                c.name
+                    .to_lowercase()
+                    .contains(&p.name_contains.as_ref().unwrap().to_lowercase())
             };
             !config
                 .policies
@@ -317,20 +317,12 @@ pub fn select_candidates(inventory: &Inventory, config: &DownloadConfig) -> Resu
         })
         .cloned()
         .collect();
-    let key = |c: &Candidate| match config.order_by {
-        OrderBy::Title => c.title.to_lowercase(),
-        OrderBy::Name => c.name.to_lowercase(),
-        OrderBy::Date => c.discovered_at.clone(),
-    };
-    rows.sort_by(|a, b| {
-        let cmp = key(a).cmp(&key(b));
-        let cmp = if config.order == Order::Descending {
-            cmp.reverse()
-        } else {
-            cmp
-        };
-        cmp.then(a.source_id.cmp(&b.source_id))
-    });
+    if config.order_by == OrderBy::Name {
+        rows.sort_by_key(|c| c.name.to_lowercase());
+    }
+    if config.order == Order::Descending {
+        rows.reverse();
+    }
     Ok(rows)
 }
 pub fn save_json(path: &Path, value: &impl Serialize) -> Result<()> {
@@ -360,8 +352,13 @@ pub fn load_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     Ok(serde_json::from_slice(&bytes)?)
 }
 pub fn load_inventory(path: &Path) -> Result<Inventory> {
-    let inventory: Inventory = load_json(path)?;
-    ensure!(inventory.version == 1, "unsupported inventory version");
+    use anyhow::Context;
+    let value: serde_json::Value = load_json(path).with_context(|| format!("collection inventory could not be read: {}\nHint: run `bfs discover -c collection.toml` or `bfs collect -c collection.toml`; check the path and permissions.", path.display()))?;
+    ensure!(
+        value.get("version").and_then(serde_json::Value::as_u64) == Some(2),
+        "unsupported discovery inventory; re-discover into a fresh collection (old acquisition formats are unsupported)"
+    );
+    let inventory: Inventory = serde_json::from_value(value)?;
     let mut ids = std::collections::BTreeSet::new();
     for c in &inventory.candidates {
         crate::http_source::safe_url(&c.url)?;
@@ -403,9 +400,9 @@ pub fn completed_inputs(config: &DownloadConfig) -> Result<Vec<CompletedInput>> 
         if entry.path().extension().is_none_or(|e| e != "json") {
             continue;
         }
-        let receipt: DownloadReceipt = load_json(&entry.path())?;
+        let receipt = load_receipt(&entry.path())?;
         ensure!(
-            receipt.version == 1
+            receipt.version == 2
                 && crate::storage::valid_hash(&receipt.sha256)
                 && receipt.candidate.source_id
                     == crate::metadata::digest(receipt.candidate.url.as_bytes()),
@@ -452,4 +449,14 @@ pub fn completed_inputs(config: &DownloadConfig) -> Result<Vec<CompletedInput>> 
     });
     ensure!(!inputs.is_empty(), "no completed downloads found");
     Ok(inputs)
+}
+
+/// Reject obsolete records before decoding their candidate schema.
+pub fn load_receipt(path: &Path) -> Result<DownloadReceipt> {
+    let value: serde_json::Value = load_json(path)?;
+    ensure!(
+        value.get("version").and_then(serde_json::Value::as_u64) == Some(2),
+        "unsupported download receipt; re-download into fresh staging (old acquisition formats are unsupported; existing payloads were retained)"
+    );
+    Ok(serde_json::from_value(value)?)
 }

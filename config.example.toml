@@ -1,5 +1,6 @@
 # LOCAL INGEST — input paths, output, workers, security and extraction limits.
-# Usage: bfs ingest --config config.toml
+# Usage: bfs organize -c config.toml
+# Both organize and ingest default to files. Pass --extract to open ZIP contents.
 # Sorting rules belong in a separate file referenced by rules below.
 # Reference: docs/configuration.md; CLI overrides TOML.
 

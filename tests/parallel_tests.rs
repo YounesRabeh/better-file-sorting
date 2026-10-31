@@ -72,6 +72,7 @@ fn archive_limit_does_not_silently_skip_remaining_entries() {
     let output = dir.path().join("repo");
     let out = common::run(&[
         "ingest".as_ref(),
+        "--extract".as_ref(),
         input.as_os_str(),
         "--output".as_ref(),
         output.as_os_str(),

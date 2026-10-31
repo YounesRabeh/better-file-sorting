@@ -74,6 +74,12 @@ pub fn discover_inputs(
             if !item.file_type().is_file() {
                 continue;
             }
+            ensure!(
+                crate::security::validate_file(item.path(), crate::config::SecurityMode::Sealed)
+                    .is_err(),
+                "input is sealed: {}; explicitly unlock selected payloads to 0600 before processing",
+                item.path().display()
+            );
             if files {
                 paths.insert(item.path().canonicalize()?);
                 continue;

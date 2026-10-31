@@ -5,18 +5,51 @@
 Examples use `bfs` on your `PATH`. After a local build, use
 `target/release/bfs` instead. Put command options after the command name.
 
+## Global presentation and configuration
+
+`-c/--config FILE` uses exactly that file. Otherwise commands loading runtime
+configuration check only `./bfs.toml`, then use built-in defaults. Explicit CLI
+flags override TOML. All relative paths resolve from cwd. `--verbose` reports the
+active file. Unknown fields and invalid values are errors.
+
+`--color auto|always|never` defaults to auto (TTY only); `NO_COLOR` disables auto.
+Explicit always/never override the environment; `--no-color` overrides all color
+modes. `--json` disables ANSI/progress on both streams. `--quiet` suppresses normal
+output, never errors; `--verbose` enables diagnostics. Compact live progress appears
+only on interactive stderr, at most 8 redraws/second. Parallel transfers share a
+single line; single-worker known-length transfers show byte percentage, unknown
+lengths show bytes. Summaries include counts, failures, bytes, elapsed and output.
+
+`collect --dry-run` never downloads payloads or writes acquisition state. A missing
+inventory or `--refresh` requires an HTML metadata request. Otherwise inventory is
+reused, including offline dry-run selection. Normal collect saves missing/refreshed
+inventory and downloads only; it never ingests or unseals.
+
+Inventories/receipts from previous releases are unsupported. To start explicitly
+fresh without deleting old data: `bfs collect URL -o ./collection-new`. There is
+no migration. Download filename templates are exactly `{original_name}` (default),
+`{name}-{source_id}`, `{source_id}`. `[download].directory` is a literal subfolder.
+Unsafe basenames are sanitized and duplicate destinations fail before writes.
+Discovery always shows original filenames, one per line in DOM order. JSON is
+`{"files":["z.zip","a.zip"]}`. Normalized duplicate URLs keep the first link.
+Remote page order may change. Internal inventory retains URLs/IDs; it has no
+`title` or `discovered_at`. Explicit name ordering affects transfers only.
+
 ## Commands
 
 | Command | What it does | Example |
 | --- | --- | --- |
-| `discover [URL] [--config <FILE>]` | Scan one HTML page and save ZIP links/titles; no resource bodies downloaded. | `bfs discover --config collection.toml` |
+| `collect [URL] [-c FILE] [-o ROOT] [-j N]` | Discover when inventory is absent, then select and download. `--refresh` forces discovery. | `bfs collect -c collection.toml` |
+| `organize [INPUTS]... [-o PATH] [--extract]` | Same engine and options as ingest; ordinary files by default. | `bfs organize ./incoming -o ./organized` |
+| `config validate [-c FILE]` | Validate TOML and security/limit settings without processing inputs. | `bfs config validate` |
+| `discover [URL] [--config <FILE>]` | Scan one HTML page and save ordered ZIP links; no resource bodies downloaded. | `bfs discover --config collection.toml` |
 | `download [--config <FILE>]` | Apply policies and transfer ZIPs into sealed staging. | `bfs download --config collection.toml` |
 | `download [--config <FILE>] --dry-run` | Offline candidate selection preview; no requests or downloads. | `bfs download --config collection.toml --dry-run` |
-| `ingest [INPUTS]...` | Extract ZIP inputs, classify their contents, deduplicate and sort into a repository. Sources remain untouched. | `bfs ingest ./incoming --output ./organized --rules ./rules.toml` |
+| `ingest [INPUTS]...` | Sort ordinary files, including ZIPs unchanged; use --extract for contents. | `bfs ingest ./incoming --output ./organized --rules ./rules.toml` |
 | `ingest --input-mode files [INPUTS]...` | Sort ordinary files and folders using the same policies. ZIP files are sorted as files, without extracting them. | `bfs ingest ./documents --input-mode files --output ./organized --rules ./rules.toml` |
 | `ingest --zip [INPUTS]...` | Sort inputs and publish only a compressed ZIP, without keeping a repository. Works with either input mode. | `bfs ingest ./documents --input-mode files --zip --output ./sorted.zip --rules ./rules.toml` |
-| `inspect [INPUTS]...` | Print ZIP entry metadata as JSON without extracting payloads. Folders are searched for ZIP archives. | `bfs inspect ./incoming --recursive false` |
-| `stats [REPOSITORY]` | Print repository counts, duplicates, categories and storage usage as JSON without reading payload contents. | `bfs stats ./organized` |
+| `inspect [INPUTS]...` | Print ZIP entry metadata (use --json for machine output) without extracting payloads. Folders are searched for ZIP archives. | `bfs inspect ./incoming --recursive false --json` |
+| `stats [REPOSITORY]` | Print repository counts, duplicates, categories and storage usage (use --json for machine output) without reading payload contents. | `bfs stats ./organized --json` |
 | `reorganize [REPOSITORY] [--rules <FILE>]` | Build a new view from stored metadata using new rules, without unlocking payloads. Previous views are retained. | `bfs reorganize ./organized --rules ./rules.toml` |
 | `help [COMMAND]` | Show general help or help for a command; `--help` / `-h` also works. | `bfs help ingest` |
 | `--version` / `-V` | Print the installed version. | `bfs --version` |
@@ -25,7 +58,7 @@ Examples use `bfs` on your `PATH`. After a local build, use
 
 | Command | Option | Required / accepted values | Effect |
 | --- | --- | --- | --- |
-| `discover` | `[URL]` | Required unless `--config` is supplied | Page URL; overrides `source.page` |
+| `discover` | `[URL]` | Required unless source.page is configured | Page URL; overrides `source.page` |
 | `discover` | `--config <FILE>` | Optional runtime TOML | Overrides built-in discovery/transfer settings |
 | `discover` | `--dry-run` | Parsed but rejected | Discovery requires requests; use download preview for offline selection |
 | `download` | `--config <FILE>` | Optional; omitted settings use defaults | Reads the saved discovery inventory |
@@ -33,7 +66,7 @@ Examples use `bfs` on your `PATH`. After a local build, use
 | Both | `--help`, `-h` | Optional | Shows command help |
 
 Transfer settings such as speed, request spacing, ordering and concurrency are
-TOML-only; these commands do not accept `--workers` or `--output`. See the
+TOML settings; `collect -j` overrides concurrency and `collect -o ROOT` selects ROOT/inventory.jsonl and ROOT/downloads. See the
 [configuration guide](configuration.md) for field ownership and worker settings.
 
 ## Defaults without configuration
@@ -72,7 +105,7 @@ and extraction limits remain active. No automatic retries or partial-file resume
 | --- | --- | --- |
 | `[INPUTS]...` | One or more file or folder paths. Explicit paths replace configured inputs. | Configured `inputs`, or completed download receipts when no explicit inputs exist. |
 | `--config <FILE>` | Load runtime settings from TOML. Explicit CLI settings override file settings. | Built-in settings when omitted. |
-| `--input-mode <MODE>` | Choose archive extraction or ordinary-file sorting. | `archives` (default), `files`. |
+| `--input-mode <MODE>` | Choose archive extraction or ordinary-file sorting. | `files` (default), `archives`; `--extract` selects archives. |
 | `--output <PATH>` | Repository directory, or destination ZIP path when ZIP output is enabled. | `organized`; use an explicit ZIP filename with `--zip`. |
 | `--rules <FILE>` | Load the central sorting policy: filename policy, ordered matchers, templates and duplicate handling. | Built-in rules: first occurrence per content hash, grouped by file type, named `{sha256}.sample`. Use `rules.files.example.toml` to retain ordinary filenames. |
 | `--zip` | Enable ZIP-only output. Refuses existing destinations and failed or interrupted runs. | Disabled. Can also be enabled with `zip = true` in config. |
@@ -84,7 +117,7 @@ and extraction limits remain active. No automatic retries or partial-file resume
 | `--workers <N>` | Set parallel ingest workers. | Available CPU parallelism capped at 8; accepts `1`–`256`. |
 | `--security-mode <MODE>` | Set repository payload permissions. Existing repository modes cannot be changed automatically. ZIP output always uses disposable private, standard-mode storage. | `sealed` (default, `0000` payloads), `standard` (`0600` payloads). |
 | `--recursive <BOOL>` | Include nested folders or only immediate children. Pass the boolean explicitly. | `true` (default), `false`. |
-| `--dry-run` | Hash/classify inputs in sealed temporary storage and print final destinations, source mapping and duplicate counts as JSON. Include existing repository metadata without publishing changes. | Disabled. Reads full contents; archive previews need input passwords. Files can change between preview and execution. Use `inspect` for metadata-only archive inspection. |
+| `--dry-run` | Hash/classify inputs in sealed temporary storage and print final destinations and duplicate counts; --json includes source mapping. Include existing repository metadata without publishing changes. | Disabled. Reads full contents; archive previews need input passwords. Files can change between preview and execution. Use `inspect` for metadata-only archive inspection. |
 | `--help` / `-h` | Show ingest help. | — |
 
 ## Other command options
@@ -97,7 +130,7 @@ and extraction limits remain active. No automatic retries or partial-file resume
 | `stats` | `<REPOSITORY>` | Existing repository; defaults to `./organized`. A ZIP output is not a repository. |
 | `reorganize` | `<REPOSITORY>` | Existing repository; defaults to `./organized`. |
 | `reorganize` | `--rules <FILE>` | Optional TOML policy; omitted uses built-in sample sorting rules. |
-| `reorganize` | `--dry-run` | Print the proposed layout as JSON without publishing a new view. |
+| `reorganize` | `--dry-run` | Print the proposed layout (--json for machine output) without publishing a new view. |
 | All commands | `--help` / `-h` | Show help for that command. |
 
 ## Selecting sorted directories
@@ -233,9 +266,10 @@ settings and CLI overrides remain supported; acquisition tables are optional.
 | `download.max_speed` | Omitted = unlimited; e.g. `"2 MB/s"`, aggregate across workers |
 | `download.min_request_interval_ms` | `0` = no spacing, shared across workers |
 | `download.max_requests` | Omitted = unlimited; redirects count, cache/dry-run do not |
-| `download.order_by` | `"title"`, also `"name"` or `"date"` (discovery timestamp) |
+| `download.order_by` | `"source"` (DOM order) or `"name"` |
 | `download.order` | `"ascending"` or `"descending"` |
-| `download.directory` | `"{title}"`, `"{name}"`, or safe literal relative path |
+| `download.filename` | `"{original_name}"`; also `"{name}-{source_id}"`, `"{source_id}"` |
+| `download.directory` | Empty by default, or a safe literal relative folder under staging payloads |
 
 Size settings accept integer bytes or strings with B/KB/MB/GB/TB (decimal),
 or KiB/MiB/GiB/TiB (binary). Fractions, unitless strings, overflow and zero
@@ -243,11 +277,11 @@ resource limits are rejected. Speed accepts these units followed by `/s`, or
 integer bytes per second; it limits application body reads, not exact
 TCP traffic. Request caps reset between command invocations. No persistent scheduler.
 
-Policies use exactly one of `title_contains` or `name_contains`, and `action`
+Policies use `name_contains`, and `action`
 `"include"` or `"exclude"`. Matching is case-insensitive. Exclusions win; if any
-include policy exists, at least one must match. Title is normalized visible anchor
-text with URL-basename fallback. Stable source IDs break ordering ties and prevent
-staging-name collisions. Publication dates and surrounding headings are not inferred.
+include policy exists, at least one must match. Download priority never changes the
+saved inventory order. Distinct URLs with the same target basename fail preflight;
+choose an ID filename template to distinguish them.
 
 Redirects are capped at five and HTTPS downgrades are refused. HTTP 429 blocks
 new requests to that origin for the invocation and reports numeric Retry-After;

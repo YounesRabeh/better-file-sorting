@@ -25,7 +25,19 @@ pub fn archive(path: &Path, entries: &[(&str, &[u8])]) {
 /// Run the compiled CLI with native argument values.
 pub fn run(args: &[&std::ffi::OsStr]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_bfs"))
+        .arg("--json")
         .args(args)
+        .args(
+            if args.first().is_some_and(|a| *a == "ingest")
+                && !args
+                    .iter()
+                    .any(|a| *a == "--input-mode" || *a == "--config")
+            {
+                vec![std::ffi::OsStr::new("--extract")]
+            } else {
+                vec![]
+            },
+        )
         .output()
         .unwrap()
 }
