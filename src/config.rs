@@ -1,3 +1,8 @@
+//! Loads runtime TOML settings, applies CLI overrides and validates ingest constraints.
+//! Defaults preserve private storage and bounded extraction. Optional acquisition tables
+//! leave local workflows unchanged; receipt-driven inputs are resolved only when explicit
+//! local inputs are absent. Download and extraction limits remain independent.
+
 use crate::{cli::Ingest, error::Error};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -63,6 +68,7 @@ impl Default for Limits {
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     #[serde(skip)]
+    /// Resolved receipt provenance indexed by canonical local input path.
     pub remote_inputs: std::collections::BTreeMap<PathBuf, crate::acquisition::Candidate>,
     pub source: Option<crate::acquisition::SourceConfig>,
     pub download: Option<crate::acquisition::DownloadConfig>,
@@ -71,6 +77,7 @@ pub struct Config {
     pub zip_dirs: Vec<String>,
     pub zip_each_dir: bool,
     pub output_password_file: Option<PathBuf>,
+    /// Private storage root for sealed payloads and transfer receipts.
     pub staging_dir: Option<PathBuf>,
     pub inputs: Vec<PathBuf>,
     pub output: PathBuf,

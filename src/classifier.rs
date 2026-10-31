@@ -1,3 +1,8 @@
+//! Identifies supported file families from a bounded content prefix.
+//! Classification is deliberately shallow: signatures and text heuristics provide
+//! organization metadata without executing files or trusting filename extensions.
+//! Unknown content remains eligible for storage under the fallback classification.
+
 /// Classify content from a bounded prefix without opening or executing it.
 pub fn classify(prefix: &[u8]) -> &'static str {
     if prefix.starts_with(b"\x7fELF") {

@@ -1,3 +1,7 @@
+//! Integration checks for acquisition tests.
+//! Exercises public BFS behavior with disposable fixtures; failures should identify
+//! contract regressions without changing user repositories.
+
 use bfs::acquisition::parse_bytes;
 
 #[test]

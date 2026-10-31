@@ -1,3 +1,7 @@
+//! Throughput harness for BFS.
+//! Uses synthetic inputs to exercise the library independently of normal CLI usage.
+//! Keep harness work isolated from user payloads and production repositories.
+
 use bfs::{
     config::{Config, Security, SecurityMode},
     metadata, organizer, pipeline,

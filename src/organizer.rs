@@ -1,3 +1,8 @@
+//! Materializes rule-planned repository views without changing canonical stored objects.
+//! View construction uses private staging and validates destination paths before
+//! publication. Metadata-only organization can operate on sealed repositories without
+//! unlocking payloads, while existing view generations remain available.
+
 use crate::{
     discovery::check_path,
     rules::{Planned, Rules, ViewMode},

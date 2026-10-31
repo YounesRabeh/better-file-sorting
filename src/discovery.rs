@@ -1,3 +1,8 @@
+//! Finds local input files without following symlinks or entering the output repository.
+//! Archive mode checks ZIP signatures; file mode retains ordinary files unchanged.
+//! Shared path validation rejects unsafe ancestors, and ingest discovery excludes
+//! configured password files and their hard links before payload processing.
+
 use anyhow::{Context, Result, ensure};
 use std::{
     collections::BTreeSet,

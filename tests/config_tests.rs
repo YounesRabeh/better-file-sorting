@@ -1,3 +1,7 @@
+//! Integration checks for config tests.
+//! Exercises public BFS behavior with disposable fixtures; failures should identify
+//! contract regressions without changing user repositories.
+
 use std::process::Command;
 /// Run ingest with a temporary configuration file.
 fn ingest(config: &str, args: &[&str]) -> std::process::Output {

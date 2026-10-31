@@ -1,3 +1,8 @@
+//! Runs the BFS command-line application and translates outcomes into process exit codes.
+//! The dispatcher connects parsed arguments to configuration, cancellation and library
+//! operations. Structured results go to stdout; diagnostics go to stderr so scripts can
+//! consume reports without mixing them with progress and error messages.
+
 use anyhow::{Context, Result};
 use bfs::{
     cli::{Cli, Command},

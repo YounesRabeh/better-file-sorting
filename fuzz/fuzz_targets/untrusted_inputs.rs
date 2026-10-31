@@ -1,3 +1,7 @@
+//! Untrusted inputs harness for BFS.
+//! Uses synthetic inputs to exercise the library independently of normal CLI usage.
+//! Keep harness work isolated from user payloads and production repositories.
+
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {

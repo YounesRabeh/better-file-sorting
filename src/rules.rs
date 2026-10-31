@@ -1,3 +1,8 @@
+//! Parses organization policies and resolves occurrence metadata into destination plans.
+//! Matching, filename templates and duplicate handling are applied deterministically.
+//! Path and collision checks protect publication, while archive-derived records retain
+//! the stricter sample filename policy even when other inputs use regular filenames.
+
 use crate::metadata::Occurrence;
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};

@@ -1,3 +1,7 @@
+//! Integration checks for extraction tests.
+//! Exercises public BFS behavior with disposable fixtures; failures should identify
+//! contract regressions without changing user repositories.
+
 use bfs::{config::Limits, extraction::extract};
 use std::{fs::File, io::Write, sync::atomic::AtomicBool};
 use zip::{ZipWriter, write::SimpleFileOptions};

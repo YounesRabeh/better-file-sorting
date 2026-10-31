@@ -1,3 +1,7 @@
+//! Integration checks for encryption tests.
+//! Exercises public BFS behavior with disposable fixtures; failures should identify
+//! contract regressions without changing user repositories.
+
 #![cfg(unix)]
 mod common;
 use std::{fs::File, io::Write, os::unix::fs::PermissionsExt};

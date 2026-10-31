@@ -1,3 +1,8 @@
+//! Coordinates discovery, extraction, classification, storage, metadata and organization.
+//! Ingest uses bounded workers and durable journals; preview runs the same planning
+//! logic in disposable storage. ZIP publication requires successful processing, and
+//! remote inputs retain stable source identities across different staging locations.
+
 use crate::{
     archive, classifier,
     config::{Config, InputMode, SecurityMode},

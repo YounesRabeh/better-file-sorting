@@ -1,3 +1,8 @@
+//! Builds repository summaries from validated occurrence metadata and storage settings.
+//! Reports distinguish logical occurrences from unique content so deduplication is
+//! visible without reopening payloads. Sealed repositories can therefore be summarized
+//! without changing their permissions or reading their contents.
+
 use crate::{
     config::SecurityMode,
     metadata::Occurrence,

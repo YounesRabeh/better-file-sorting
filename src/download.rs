@@ -1,4 +1,13 @@
-//! Bounded transfers into sealed, receipt-owned staging.
+//! Transfers policy-selected resources into private, sealed staging with completion receipts.
+//! Workers share request controls and byte budgets; files remain inaccessible by path
+//! while their creation handles receive data. Only synchronized completed payloads are
+//! published. Reruns validate sealed cache records, and failures never become receipts.
+
+/// Maximum body read chunk, also bounding the speed limiter burst.
+const TRANSFER_BUFFER_BYTES: usize = 16 * 1024;
+/// Maximum sanitized label length, leaving room for the source hash and extension.
+const MAX_LABEL_CHARS: usize = 80;
+
 use crate::{
     acquisition::*,
     config::SecurityMode,
@@ -37,7 +46,7 @@ fn safe_component(text: &str) -> String {
                 '_'
             }
         })
-        .take(80)
+        .take(MAX_LABEL_CHARS)
         .collect();
     if value.is_empty() {
         "download".into()
@@ -183,7 +192,7 @@ pub fn run(
                         .and_then(|v| v.to_str().ok())
                         .and_then(|s| s.parse::<u64>().ok());
                     let mut reader = response.body_mut().as_reader();
-                    let mut buffer = [0u8; 16384];
+                    let mut buffer = [0u8; TRANSFER_BUFFER_BYTES];
                     let mut size = 0u64;
                     let mut hash = Sha256::new();
                     loop {

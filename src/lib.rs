@@ -1,3 +1,8 @@
+//! Exposes the BFS library modules used by the CLI and integration tests.
+//! Acquisition produces verified local inputs; the existing pipeline handles extraction,
+//! classification, content-addressed storage, rule planning and optional ZIP export.
+//! Security and filesystem checks are shared across these boundaries.
+
 pub mod archive;
 pub mod classifier;
 pub mod cli;

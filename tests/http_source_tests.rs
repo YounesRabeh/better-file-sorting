@@ -1,3 +1,7 @@
+//! Integration checks for http source tests.
+//! Exercises public BFS behavior with disposable fixtures; failures should identify
+//! contract regressions without changing user repositories.
+
 use bfs::{acquisition::SourceConfig, http_source::parse_links};
 #[test]
 fn links_are_resolved_deduplicated_and_titled() {

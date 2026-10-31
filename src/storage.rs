@@ -1,3 +1,8 @@
+//! Maintains the private content-addressed repository and its exclusive writer lock.
+//! Objects are published under validated SHA-256 identities without overwriting existing
+//! content. Repository security mode is persisted and cannot change automatically;
+//! staging recovery and object validation keep interrupted runs recoverable.
+
 use crate::{config::SecurityMode, security};
 use anyhow::{Result, ensure};
 use std::{

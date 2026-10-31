@@ -1,3 +1,7 @@
+//! Integration checks for archive tests.
+//! Exercises public BFS behavior with disposable fixtures; failures should identify
+//! contract regressions without changing user repositories.
+
 use std::{fs::File, io::Write, process::Command};
 use zip::{ZipWriter, write::SimpleFileOptions};
 /// Build a harmless single-entry ZIP fixture.

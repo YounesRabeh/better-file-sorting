@@ -1,3 +1,8 @@
+//! Declares the public command-line interface and clap argument metadata.
+//! Commands separate discovery, download, ingest, inspection, statistics and reorganization.
+//! Parsing does not perform filesystem or network work; main dispatches commands and
+//! configuration merging resolves optional overrides before the pipeline runs.
+
 use crate::config::SecurityMode;
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;

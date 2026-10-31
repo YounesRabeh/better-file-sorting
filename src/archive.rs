@@ -1,3 +1,8 @@
+//! Inspects ZIP metadata and exports rule-planned layouts as ZIP archives.
+//! Input opening enforces configured archive limits; output publication uses private
+//! temporary storage and refuses replacement of existing destinations. Export selection
+//! is shared with preview so users see the same directory choices before publication.
+
 use crate::{config::Limits, discovery::check_path};
 use anyhow::{Result, ensure};
 use serde::Serialize;

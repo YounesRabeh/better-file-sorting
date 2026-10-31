@@ -1,3 +1,8 @@
+//! Streams ordinary files or individual ZIP entries into sealed temporary storage.
+//! Each copy computes SHA-256 and a bounded classification prefix while enforcing
+//! configured size and expansion limits. Archive names, entry kinds, integrity and
+//! cancellation are checked before extracted content can become a stored object.
+
 use crate::config::Limits;
 use anyhow::{Result, bail, ensure};
 use sha2::{Digest, Sha256};

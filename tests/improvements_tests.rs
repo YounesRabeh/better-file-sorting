@@ -1,3 +1,7 @@
+//! Integration checks for improvements tests.
+//! Exercises public BFS behavior with disposable fixtures; failures should identify
+//! contract regressions without changing user repositories.
+
 #![cfg(unix)]
 mod common;
 use std::{fs, os::unix::fs::PermissionsExt};

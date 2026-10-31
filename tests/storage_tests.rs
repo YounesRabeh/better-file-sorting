@@ -1,3 +1,7 @@
+//! Integration checks for storage tests.
+//! Exercises public BFS behavior with disposable fixtures; failures should identify
+//! contract regressions without changing user repositories.
+
 #![cfg(unix)]
 use bfs::{classifier::classify, config::SecurityMode, storage::Repository};
 use std::{

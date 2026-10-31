@@ -1,3 +1,7 @@
+//! Integration checks for rules tests.
+//! Exercises public BFS behavior with disposable fixtures; failures should identify
+//! contract regressions without changing user repositories.
+
 use bfs::{metadata::Occurrence, rules::Rules};
 /// Build a deterministic occurrence fixture for rules tests.
 fn row(name: &str, id: char, hash: char) -> Occurrence {

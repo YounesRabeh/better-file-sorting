@@ -1,3 +1,8 @@
+//! Implements the platform permission and publication primitives used throughout BFS.
+//! Directories are private, standard metadata is owner-readable/writable, and sealed
+//! payloads have no permission bits. Operations fail closed when safeguards cannot be
+//! enforced; sealing is a permission boundary rather than a sandbox against owner/root.
+
 use crate::{config::SecurityMode, discovery::check_path};
 use anyhow::{Result, bail, ensure};
 use std::{

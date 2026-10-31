@@ -1,3 +1,7 @@
+//! Integration checks for platform tests.
+//! Exercises public BFS behavior with disposable fixtures; failures should identify
+//! contract regressions without changing user repositories.
+
 #[cfg(not(unix))]
 #[test]
 /// Ensure unsupported platforms fail closed instead of weakening storage.

@@ -1,4 +1,13 @@
-//! Acquisition configuration and durable inventories, separate from payload storage.
+//! Defines the acquisition configuration, policy selection, and durable transfer inventory.
+//! Discovery and download share these records; ingestion consumes completion receipts only
+//! after the user explicitly unlocks payloads and their size and SHA-256 are verified.
+//! Metadata is bounded and published atomically, independently of sealed payload storage.
+
+/// Maximum serialized inventory or receipt size accepted from disk.
+const MAX_METADATA_BYTES: u64 = 16 * 1024 * 1024;
+/// Streaming hash buffer size; independent of user payload limits.
+const HASH_BUFFER_BYTES: usize = 64 * 1024;
+
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -36,8 +45,11 @@ pub fn parse_bytes(value: &str) -> Result<u64> {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SourceConfig {
+    /// HTTP(S) page whose direct resource links are discovered.
     pub page: String,
+    /// Whether requests and redirects must remain on the page origin.
     pub same_origin: bool,
+    /// Maximum HTML response body, expressed with a readable byte unit.
     pub max_page_size: String,
 }
 impl Default for SourceConfig {
@@ -80,20 +92,35 @@ pub struct Policy {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DownloadConfig {
+    /// Durable discovery inventory path, relative to the working directory.
     pub inventory: PathBuf,
+    /// Private storage root for sealed payloads and transfer receipts.
     pub staging_dir: PathBuf,
+    /// Maximum number of uncached candidates attempted per invocation.
     pub max_files: usize,
+    /// Maximum downloaded payload size, independent of extraction limits.
     pub max_file_size: String,
+    /// Aggregate body-byte budget, including failed transfers.
     pub max_total_size: String,
+    /// Managed payload storage budget, including existing partial files.
     pub max_staging_size: String,
+    /// Maximum number of transfer workers sharing all aggregate limits.
     pub concurrency: usize,
+    /// Transfer timeout in seconds, including pacing waits.
     pub timeout_seconds: u64,
+    /// Optional aggregate body-read rate; omission leaves speed uncapped.
     pub max_speed: Option<String>,
+    /// Minimum spacing between request starts, including redirect hops.
     pub min_request_interval_ms: u64,
+    /// Optional request-count cap for one command invocation.
     pub max_requests: Option<usize>,
+    /// Candidate metadata field used for deterministic selection order.
     pub order_by: OrderBy,
+    /// Ascending or descending candidate priority.
     pub order: Order,
+    /// Safe staging directory template; does not control extracted-content rules.
     pub directory: String,
+    /// Include/exclude filters; exclusions take precedence.
     pub policies: Vec<Policy>,
 }
 impl Default for DownloadConfig {
@@ -172,10 +199,12 @@ impl DownloadConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Candidate {
+    /// Stable digest of the normalized resource URL, independent of local paths.
     pub source_id: String,
     pub url: String,
     pub title: String,
     pub name: String,
+    /// UTC discovery timestamp, not a resource publication date.
     pub discovered_at: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +220,7 @@ pub struct DownloadReceipt {
     pub candidate: Candidate,
     pub path: PathBuf,
     pub size: u64,
+    /// Content digest used to verify integrity and identify stored objects.
     pub sha256: String,
 }
 #[derive(Debug, Default, Serialize)]
@@ -265,10 +295,10 @@ pub fn load_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     crate::security::validate_file(path, crate::config::SecurityMode::Standard)?;
     let mut bytes = vec![];
     File::open(path)?
-        .take(16 * 1024 * 1024 + 1)
+        .take(MAX_METADATA_BYTES + 1)
         .read_to_end(&mut bytes)?;
     ensure!(
-        bytes.len() <= 16 * 1024 * 1024,
+        bytes.len() as u64 <= MAX_METADATA_BYTES,
         "acquisition metadata exceeds 16 MiB"
     );
     Ok(serde_json::from_slice(&bytes)?)
@@ -343,7 +373,7 @@ pub fn completed_inputs(config: &DownloadConfig) -> Result<Vec<CompletedInput>> 
             "download size changed"
         );
         let mut hash = Sha256::new();
-        let mut buffer = [0; 65536];
+        let mut buffer = [0; HASH_BUFFER_BYTES];
         loop {
             let n = reader.read(&mut buffer)?;
             if n == 0 {

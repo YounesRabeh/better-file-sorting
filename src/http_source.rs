@@ -1,4 +1,13 @@
-//! Direct HTML link discovery and shared request pacing.
+//! Discovers direct ZIP links in HTML and centralizes HTTP request restrictions.
+//! URL validation, redirect checks, origin boundaries, request caps and spacing are
+//! shared by page discovery and payload transfers. HTML parsing resolves relative links
+//! and extracts visible titles without crawling pages or executing JavaScript.
+
+/// Maximum redirect hops; a fixed protocol safeguard shared by acquisition commands.
+const MAX_REDIRECTS: usize = 5;
+/// Upper bound on cancellation latency during pacing waits.
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(25);
+
 use crate::acquisition::*;
 use anyhow::{Result, ensure};
 use std::{
@@ -31,7 +40,7 @@ pub fn wait_until(deadline: Instant, cancelled: &AtomicBool) -> Result<()> {
         std::thread::sleep(
             deadline
                 .saturating_duration_since(Instant::now())
-                .min(Duration::from_millis(25)),
+                .min(CANCEL_POLL_INTERVAL),
         );
     }
     ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
@@ -82,7 +91,7 @@ impl HttpSource {
             .checked_add(self.timeout)
             .ok_or_else(|| anyhow::anyhow!("timeout too large"))?;
         let mut url = safe_url(value)?;
-        for hop in 0..=5 {
+        for hop in 0..=MAX_REDIRECTS {
             ensure!(
                 !self.same_origin || url.origin() == self.origin.origin(),
                 "cross-origin request refused"
@@ -125,7 +134,7 @@ impl HttpSource {
                 anyhow::bail!("HTTP 429; Retry-After: {retry}");
             }
             if response.status().is_redirection() {
-                ensure!(hop < 5, "redirect limit reached");
+                ensure!(hop < MAX_REDIRECTS, "redirect limit reached");
                 let location = response
                     .headers()
                     .get("location")

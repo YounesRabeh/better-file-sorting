@@ -1,3 +1,8 @@
+//! Stores and loads occurrence manifests describing ingested content and its origins.
+//! Content hashes identify objects; occurrence identities retain distinct source events.
+//! Loading validates bounded records, reconciles duplicates and tolerates interrupted
+//! final journal lines. Optional remote provenance preserves compatibility with old data.
+
 use crate::{config::SecurityMode, security, storage::valid_hash};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -12,11 +17,13 @@ use std::{
 #[serde(deny_unknown_fields)]
 pub struct Occurrence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional remote source context; absent in legacy and local records.
     pub provenance: Option<crate::acquisition::Candidate>,
     /// Old manifests conservatively retain archive-sample safeguards.
     #[serde(default)]
     pub input_mode: crate::config::InputMode,
     pub occurrence_id: String,
+    /// Content digest used to verify integrity and identify stored objects.
     pub sha256: String,
     pub size: u64,
     pub file_type: String,

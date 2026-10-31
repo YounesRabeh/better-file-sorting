@@ -1,3 +1,7 @@
+//! Integration checks for integration tests.
+//! Exercises public BFS behavior with disposable fixtures; failures should identify
+//! contract regressions without changing user repositories.
+
 #![cfg(unix)]
 mod common;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
