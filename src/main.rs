@@ -32,7 +32,33 @@ fn run(cli: Cli) -> Result<u8> {
             println!("{}", serde_json::to_string_pretty(&inventory)?);
             Ok(0)
         }
-        Command::Download(_) => anyhow::bail!("download implementation pending"),
+        Command::Download(args) => {
+            let config = Config::load(Some(&args.config))?;
+            let download = config
+                .download
+                .as_ref()
+                .context("download configuration required")?;
+            let inventory = bfs::acquisition::load_inventory(&download.inventory)?;
+            let report = if args.dry_run {
+                bfs::download::preview(download, &inventory)?
+            } else {
+                let source = config
+                    .source
+                    .as_ref()
+                    .context("source configuration required")?;
+                bfs::download::run(download, source, &inventory, cancellation()?.as_ref())?
+            };
+            let incomplete = report.failed > 0 || report.not_attempted > 0;
+            let code = if !incomplete {
+                0
+            } else if report.downloaded + report.cached > 0 {
+                2
+            } else {
+                1
+            };
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(code)
+        }
         Command::Ingest(args) => {
             let config = Config::for_ingest(&args)?;
             let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
