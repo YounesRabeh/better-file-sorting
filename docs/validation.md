@@ -89,3 +89,8 @@ Command being timed: "target/release/deps/throughput-c98f2e1688f04de4"
 	Page size (bytes): 4096
 	Exit status: 0
 ```
+
+BFS 0.4.0 adds direct HTTP ZIP discovery, policy-controlled sealed staging, shared
+speed/request limits and receipt-verified ingest. See `collection.example.toml`
+and the acquisition command reference. Local HTTP fixture tests generate/serve
+ZIP payloads without depending on public sites.

@@ -16,3 +16,8 @@ bfs reorganize ./repository --rules ./rules.toml
 ```
 
 See the repository README and `config.example.toml` for limits, passwords, and security modes. Releases and CI support Linux only; no Windows or macOS executables are distributed.
+
+BFS 0.4.0 adds direct HTTP ZIP discovery, policy-controlled sealed staging, shared
+speed/request limits and receipt-verified ingest. See `collection.example.toml`
+and the acquisition command reference. Local HTTP fixture tests generate/serve
+ZIP payloads without depending on public sites.

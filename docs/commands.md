@@ -139,3 +139,73 @@ See the [ZIP usage notes](../README.md#sort-regular-folders-and-zip-the-result).
 | `0` | Command succeeded. |
 | `1` | Runtime error, or ingest failed/interrupted without accepting any files. ZIP publication failures return this code. |
 | `2` | Repository ingest accepted some files but also encountered failures or interruption; CLI argument errors also use this code. |
+
+## Acquisition commands
+
+`bfs discover --config FILE` scans one HTML page, resolves direct `.zip` links,
+deduplicates fragment-free URLs, and atomically saves a versioned inventory.
+The inventory filename may end in `.jsonl` for compatibility with the example,
+but its content is one versioned JSON object, not an append-only JSONL stream.
+No payload is downloaded. Page failures preserve the previous inventory.
+
+`bfs download --config FILE --dry-run` reads the inventory without HTTP requests
+or staging writes and prints selected candidates. `bfs download --config FILE`
+applies policies, downloads files and writes completion receipts. Reports contain
+candidate source IDs and errors; local placement is also saved in receipts under
+`staging_dir/control`. Payloads live under `staging_dir/payloads`.
+
+`bfs ingest --config FILE` without explicit inputs loads all completed receipts,
+requires explicit unlocking to 0600, verifies hashes, then uses existing ingest.
+It never ingests inventory/control files or partial transfers. Use `--dry-run` for
+the existing full ingest preview. Unreceipted partials are ignored and count toward
+staging usage. Missing or altered receipted payloads fail validation.
+
+All paths are relative to the working directory. Existing root-level ingest
+settings and CLI overrides remain supported; acquisition tables are optional.
+
+| Setting | Default / meaning |
+| --- | --- |
+| `source.page` | Required HTTP(S) HTML page |
+| `source.same_origin` | `true`; applies to links and redirect hops |
+| `source.max_page_size` | `"5 MB"` |
+| `download.inventory` | `"./collection/inventory.jsonl"` |
+| `download.staging_dir` | `"./collection/downloads"` |
+| `download.max_files` | `100` non-cached candidates attempted per invocation |
+| `download.max_file_size` | `"1 GB"` |
+| `download.max_total_size` | `"10 GB"` body bytes per invocation, including failed transfers |
+| `download.max_staging_size` | `"20 GB"` managed payload bytes, including partials |
+| `download.concurrency` | `3`, range 1–256 |
+| `download.timeout_seconds` | `300` per transfer; network timeouts also bound individual requests |
+| `download.max_speed` | Omitted = unlimited; e.g. `"2 MB/s"`, aggregate across workers |
+| `download.min_request_interval_ms` | `0` = no spacing, shared across workers |
+| `download.max_requests` | Omitted = unlimited; redirects count, cache/dry-run do not |
+| `download.order_by` | `"title"`, also `"name"` or `"date"` (discovery timestamp) |
+| `download.order` | `"ascending"` or `"descending"` |
+| `download.directory` | `"{title}"`, `"{name}"`, or safe literal relative path |
+
+Sizes accept positive integers with B/KB/MB/GB/TB (decimal), or KiB/MiB/GiB/TiB
+(binary). Fractions, missing units, overflow and zero limits are rejected. Speed
+uses the same units followed by `/s`; it limits application body reads, not exact
+TCP traffic. Request caps reset between command invocations. No persistent scheduler.
+
+Policies use exactly one of `title_contains` or `name_contains`, and `action`
+`"include"` or `"exclude"`. Matching is case-insensitive. Exclusions win; if any
+include policy exists, at least one must match. Title is normalized visible anchor
+text with URL-basename fallback. Stable source IDs break ordering ties and prevent
+staging-name collisions. Publication dates and surrounding headings are not inferred.
+
+Redirects are capped at five and HTTPS downgrades are refused. HTTP 429 blocks
+new requests to that origin for the invocation and reports numeric Retry-After;
+there are no automatic retries. URLs with credentials or queries are unsupported.
+No JavaScript, crawling, authentication, nested ZIP recursion, SFTP, range resume,
+automatic cleanup, or non-ZIP extraction. Existing extraction limits still apply
+independently and can be smaller than the download limits.
+
+Downloaded payloads are sealed 0000 from creation through publication, directories
+0700 and control files 0600. Owner/root can change permissions; this is not a noexec
+mount. No automatic permission changes unlock payloads. Failed transfers do not
+receive completion receipts; reruns validate sealed cache metadata and ingest checks
+full hashes after explicit unlocking. Simultaneous download writers are locked out.
+
+Exit codes: 0 success (including intentional policy filtering), 2 mixed success and
+incomplete/failed work, 1 failure without success. Budget-blocked work is incomplete.

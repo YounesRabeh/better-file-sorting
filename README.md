@@ -111,6 +111,36 @@ planned destinations, source paths, and duplicate counts without publishing
 output. The export refuses existing ZIP destinations and failed or interrupted
 runs. Already-compressed files may shrink little or produce a larger ZIP.
 
+## Download collections (0.4.0)
+
+Use [collection.example.toml](collection.example.toml) to discover direct ZIP links
+on one HTTP(S) page, preview selection, and download into sealed private staging:
+
+```sh
+bfs discover --config collection.toml
+bfs download --config collection.toml --dry-run
+bfs download --config collection.toml
+```
+
+Downloads have `0000` permissions. Explicitly unlock only the receipt-owned ZIPs
+you want to ingest, using their paths in the download report/control receipts:
+
+```sh
+chmod 600 ./collection/downloads/payloads/TITLE/FILE.zip
+bfs ingest --config collection.toml --dry-run
+bfs ingest --config collection.toml
+```
+
+Ingest with no explicit input paths verifies completed receipts and hashes before
+processing. Explicit local inputs keep their existing behavior. Completed downloads
+are retained; BFS never automatically unseals or deletes them. After unlocking,
+`download` intentionally refuses reuse until you explicitly reseal the files
+with `chmod 000`. Sealing is a file-permission safeguard, not a sandbox.
+
+Title means visible link text; date ordering uses discovery time. Policies choose
+which ZIPs to download and stage; existing sorting rules organize their contents.
+See [acquisition configuration](docs/commands.md#acquisition-commands) for limits.
+
 ## Usage
 
 CLI options override [runtime configuration](config.example.toml). Sorting rules

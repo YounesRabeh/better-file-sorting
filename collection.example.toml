@@ -1,0 +1,35 @@
+# Run from the directory against which these paths should resolve.
+input_mode = "archives"
+output = "./sorted.zip"
+zip = true
+rules = "./rules.example.toml"
+
+[source]
+page = "https://example.org/downloads/"
+same_origin = true
+max_page_size = "5 MB"
+
+[download]
+inventory = "./collection/inventory.jsonl"
+staging_dir = "./collection/downloads"
+max_files = 100
+max_file_size = "1 GB"
+max_total_size = "10 GB"
+max_staging_size = "20 GB"
+concurrency = 3
+timeout_seconds = 300
+# Omit any of these optional caps for unrestricted speed/request count.
+# max_speed = "2 MB/s"
+# min_request_interval_ms = 1000
+# max_requests = 100
+order_by = "title"
+order = "ascending"
+directory = "{title}"
+
+# Exclusions win; when includes exist, at least one must match.
+# [[download.policies]]
+# title_contains = "Linux"
+# action = "include"
+# [[download.policies]]
+# name_contains = "deprecated"
+# action = "exclude"
