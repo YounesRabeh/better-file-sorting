@@ -113,6 +113,23 @@ runs. Already-compressed files may shrink little or produce a larger ZIP.
 
 ## Download collections
 
+For the default workflow, no configuration file is required:
+
+```sh
+bfs discover https://example.org/downloads/
+bfs download --dry-run
+bfs download
+# Explicitly unlock the completed receipt-owned payloads before ingestion.
+bfs ingest
+bfs stats
+```
+
+Downloads use three workers with no pacing delay or speed, request-count, file-count,
+or byte caps. Network timeouts, sealed permissions and extraction safeguards remain
+active. `bfs ingest` uses completed default download receipts, or `./incoming` when
+none are configured/present; output defaults to `./organized`. `bfs inspect` reads
+`./incoming`; `bfs reorganize --dry-run` previews default rules for `./organized`.
+
 Use [collection.example.toml](collection.example.toml) to discover direct ZIP links
 on one HTTP(S) page, preview selection, and download into sealed private staging:
 
@@ -160,14 +177,14 @@ when file mode is selected.
 | Task | Command |
 | --- | --- |
 | Show all ingest options | `bfs ingest --help` |
-| Sort ordinary files into a readable private repository | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --output ./repository --security-mode standard` |
-| Inspect ZIP metadata without extracting contents | `bfs inspect ./downloads` |
-| Ingest ZIP entries into a sealed repository | `bfs ingest ./downloads --rules ./rules.example.toml --output ./samples` |
-| Preview destinations before ingest | `bfs ingest ./downloads --rules ./rules.example.toml --output ./samples --dry-run` |
-| Show repository statistics | `bfs stats ./repository` |
-| Preview new rules for an existing repository | `bfs reorganize ./repository --rules ./rules.toml --dry-run` |
-| Publish a new view with updated rules | `bfs reorganize ./repository --rules ./rules.toml` |
-| Limit discovery to immediate children | `bfs ingest ./documents --input-mode files --recursive false --output ./repository` |
+| Sort ordinary files into a readable private repository | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --output ./organized --security-mode standard` |
+| Inspect ZIP metadata without extracting contents | `bfs inspect ./incoming` |
+| Ingest ZIP entries into a sealed repository | `bfs ingest ./incoming --rules ./rules.example.toml --output ./samples` |
+| Preview destinations before ingest | `bfs ingest ./incoming --rules ./rules.example.toml --output ./samples --dry-run` |
+| Show repository statistics | `bfs stats ./organized` |
+| Preview new rules for an existing repository | `bfs reorganize ./organized --rules ./rules.toml --dry-run` |
+| Publish a new view with updated rules | `bfs reorganize ./organized --rules ./rules.toml` |
+| Limit discovery to immediate children | `bfs ingest ./documents --input-mode files --recursive false --output ./organized` |
 | Load runtime settings from TOML | `bfs ingest --config ./config.toml` |
 
 </details>
@@ -198,7 +215,7 @@ exactly one nonempty line. Password files and their hard links are excluded from
 | Create one ZIP per top-level sorted directory | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip-each-dir --output ./exports` |
 | Create separate ZIPs for selected directories | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip-dir documents/pdf --zip-dir text --zip-each-dir --output ./exports` |
 | Encrypt the output ZIP with AES-256 | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip --output ./private.zip --output-password-file ./output-password.txt` |
-| Decrypt archive inputs and export their sorted contents | `bfs ingest ./downloads --password-file ./input-passwords.txt --rules ./rules.example.toml --zip --output ./sorted.zip` |
+| Decrypt archive inputs and export their sorted contents | `bfs ingest ./incoming --password-file ./input-passwords.txt --rules ./rules.example.toml --zip --output ./sorted.zip` |
 | Select temporary storage for ZIP output | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip --output ./sorted.zip --staging-dir /existing/scratch` |
 
 </details>

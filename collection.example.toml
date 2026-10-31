@@ -1,3 +1,4 @@
+# The limits below are an opt-in bounded preset; bare bfs download has no byte/count caps.
 # WEB COLLECTION — discover ZIP links, download sealed payloads, then ingest.
 # Usage: bfs discover --config collection.toml; bfs download --config collection.toml
 # Explicitly unlock completed payloads before bfs ingest --config collection.toml.

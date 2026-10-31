@@ -6,6 +6,11 @@
 //! leave local workflows unchanged; receipt-driven inputs are resolved only when explicit
 //! local inputs are absent. Download and extraction limits remain independent.
 
+/// Default local input directory when no explicit paths or download receipts are selected.
+pub const DEFAULT_INPUT_DIRECTORY: &str = "incoming";
+/// Default repository used by ingest, statistics and reorganization.
+pub const DEFAULT_REPOSITORY: &str = "organized";
+
 use crate::{cli::Ingest, error::Error};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -112,7 +117,7 @@ impl Default for Config {
             output_password_file: None,
             staging_dir: None,
             inputs: vec![],
-            output: "repository".into(),
+            output: DEFAULT_REPOSITORY.into(),
             recursive: true,
             workers: std::thread::available_parallelism().map_or(1, |n| n.get().min(8)),
             password_file: None,
@@ -177,6 +182,14 @@ impl Config {
         }
         if let Some(v) = args.recursive {
             c.recursive = v;
+        }
+        if c.inputs.is_empty() && c.download.is_none() && args.config.is_none() {
+            let download = crate::acquisition::DownloadConfig::default();
+            if download.staging_dir.join("control").try_exists()? {
+                c.download = Some(download);
+            } else {
+                c.inputs.push(DEFAULT_INPUT_DIRECTORY.into());
+            }
         }
         if c.inputs.is_empty()
             && let Some(download) = &c.download

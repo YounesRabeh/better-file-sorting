@@ -85,3 +85,21 @@ fn existing_staging_directory_must_be_private() {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(bfs::acquisition::private_tree(&path).is_err());
 }
+
+#[test]
+fn download_defaults_do_not_impose_transfer_caps() {
+    use bfs::acquisition::*;
+    let config = DownloadConfig::default();
+    config.validate().unwrap();
+    assert_eq!(config.max_files, usize::MAX);
+    for size in [
+        &config.max_file_size,
+        &config.max_total_size,
+        &config.max_staging_size,
+    ] {
+        assert_eq!(parse_bytes(size).unwrap(), u64::MAX);
+    }
+    assert_eq!(config.speed().unwrap(), None);
+    assert_eq!(config.min_request_interval_ms, 0);
+    assert_eq!(config.max_requests, None);
+}

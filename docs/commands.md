@@ -9,15 +9,15 @@ Examples use `bfs` on your `PATH`. After a local build, use
 
 | Command | What it does | Example |
 | --- | --- | --- |
-| `discover --config <FILE>` | Scan one HTML page and save ZIP links/titles; no resource bodies downloaded. | `bfs discover --config collection.toml` |
-| `download --config <FILE>` | Apply policies and transfer ZIPs into sealed staging. | `bfs download --config collection.toml` |
-| `download --config <FILE> --dry-run` | Offline candidate selection preview; no requests or downloads. | `bfs download --config collection.toml --dry-run` |
-| `ingest [INPUTS]...` | Extract ZIP inputs, classify their contents, deduplicate and sort into a repository. Sources remain untouched. | `bfs ingest ./downloads --output ./repository --rules ./rules.toml` |
-| `ingest --input-mode files [INPUTS]...` | Sort ordinary files and folders using the same policies. ZIP files are sorted as files, without extracting them. | `bfs ingest ./documents --input-mode files --output ./repository --rules ./rules.toml` |
+| `discover [URL] [--config <FILE>]` | Scan one HTML page and save ZIP links/titles; no resource bodies downloaded. | `bfs discover --config collection.toml` |
+| `download [--config <FILE>]` | Apply policies and transfer ZIPs into sealed staging. | `bfs download --config collection.toml` |
+| `download [--config <FILE>] --dry-run` | Offline candidate selection preview; no requests or downloads. | `bfs download --config collection.toml --dry-run` |
+| `ingest [INPUTS]...` | Extract ZIP inputs, classify their contents, deduplicate and sort into a repository. Sources remain untouched. | `bfs ingest ./incoming --output ./organized --rules ./rules.toml` |
+| `ingest --input-mode files [INPUTS]...` | Sort ordinary files and folders using the same policies. ZIP files are sorted as files, without extracting them. | `bfs ingest ./documents --input-mode files --output ./organized --rules ./rules.toml` |
 | `ingest --zip [INPUTS]...` | Sort inputs and publish only a compressed ZIP, without keeping a repository. Works with either input mode. | `bfs ingest ./documents --input-mode files --zip --output ./sorted.zip --rules ./rules.toml` |
-| `inspect [INPUTS]...` | Print ZIP entry metadata as JSON without extracting payloads. Folders are searched for ZIP archives. | `bfs inspect ./downloads --recursive false` |
-| `stats <REPOSITORY>` | Print repository counts, duplicates, categories and storage usage as JSON without reading payload contents. | `bfs stats ./repository` |
-| `reorganize <REPOSITORY> --rules <FILE>` | Build a new view from stored metadata using new rules, without unlocking payloads. Previous views are retained. | `bfs reorganize ./repository --rules ./rules.toml` |
+| `inspect [INPUTS]...` | Print ZIP entry metadata as JSON without extracting payloads. Folders are searched for ZIP archives. | `bfs inspect ./incoming --recursive false` |
+| `stats [REPOSITORY]` | Print repository counts, duplicates, categories and storage usage as JSON without reading payload contents. | `bfs stats ./organized` |
+| `reorganize [REPOSITORY] [--rules <FILE>]` | Build a new view from stored metadata using new rules, without unlocking payloads. Previous views are retained. | `bfs reorganize ./organized --rules ./rules.toml` |
 | `help [COMMAND]` | Show general help or help for a command; `--help` / `-h` also works. | `bfs help ingest` |
 | `--version` / `-V` | Print the installed version. | `bfs --version` |
 
@@ -25,15 +25,35 @@ Examples use `bfs` on your `PATH`. After a local build, use
 
 | Command | Option | Required / accepted values | Effect |
 | --- | --- | --- | --- |
-| `discover` | `--config <FILE>` | Required; runtime TOML with `[source]` and `[download]` | Reads the page and writes the configured inventory |
+| `discover` | `[URL]` | Required unless `--config` is supplied | Page URL; overrides `source.page` |
+| `discover` | `--config <FILE>` | Optional runtime TOML | Overrides built-in discovery/transfer settings |
 | `discover` | `--dry-run` | Parsed but rejected | Discovery requires requests; use download preview for offline selection |
-| `download` | `--config <FILE>` | Required; `[download]`, plus `[source]` for transfers | Reads the saved discovery inventory |
+| `download` | `--config <FILE>` | Optional; omitted settings use defaults | Reads the saved discovery inventory |
 | `download` | `--dry-run` | Optional flag | Shows selected candidates without network or staging writes |
 | Both | `--help`, `-h` | Optional | Shows command help |
 
 Transfer settings such as speed, request spacing, ordering and concurrency are
 TOML-only; these commands do not accept `--workers` or `--output`. See the
 [configuration guide](configuration.md) for field ownership and worker settings.
+
+## Defaults without configuration
+
+| Command | Default behavior |
+| --- | --- |
+| `bfs discover URL` | Scans the supplied page and writes `./collection/inventory.jsonl`; no built-in website |
+| `bfs download` | Reads that inventory and downloads to `./collection/downloads`; 3 workers, no delay, no speed/request/count/size caps |
+| `bfs download --dry-run` | Offline selection from the default inventory |
+| `bfs ingest` | Uses completed download receipts when the default control directory exists; otherwise reads `./incoming`; writes sealed `./organized` |
+| `bfs inspect` | Inspects ZIPs in `./incoming` without extracting them |
+| `bfs stats` | Summarizes `./organized` |
+| `bfs reorganize` | Adds a new default-policy view to `./organized`; use `--rules` to change policy and `--dry-run` to preview |
+
+Explicit paths and configured inputs win. Custom download paths require the same
+configuration for ingest. Downloaded files still require explicit unlocking before
+ingest; absent input directories/repositories/inventories produce errors. Unlimited
+download defaults are bounded by filesystem capacity and integer representation;
+finite network timeouts (300 seconds per transfer), origin checks, sealed permissions,
+and extraction limits remain active. No automatic retries or partial-file resume.
 
 ## Common workflows
 
@@ -42,9 +62,9 @@ TOML-only; these commands do not accept `--workers` or `--output`. See the
 | Download a web collection | `bfs discover --config collection.toml`, then `bfs download --config collection.toml` |
 | Sort downloaded contents | Explicitly unlock all receipt-owned ZIPs to `0600`, then `bfs ingest --config collection.toml` |
 | Preview before writing | Download: `--dry-run` selects candidates offline. Ingest: `--dry-run` reads payloads and plans final destinations. |
-| Sort local files | `bfs ingest ./documents --input-mode files --rules rules.files.example.toml --output repository` |
-| Read ZIP metadata only | `bfs inspect ./downloads` |
-| Change an existing repository layout | `bfs reorganize ./repository --rules rules.toml --dry-run`, then omit `--dry-run` |
+| Sort local files | `bfs ingest ./documents --input-mode files --rules rules.files.example.toml --output organized` |
+| Read ZIP metadata only | `bfs inspect ./incoming` |
+| Change an existing repository layout | `bfs reorganize ./organized --rules rules.toml --dry-run`, then omit `--dry-run` |
 
 ## Ingest options
 
@@ -53,7 +73,7 @@ TOML-only; these commands do not accept `--workers` or `--output`. See the
 | `[INPUTS]...` | One or more file or folder paths. Explicit paths replace configured inputs. | Configured `inputs`, or completed download receipts when no explicit inputs exist. |
 | `--config <FILE>` | Load runtime settings from TOML. Explicit CLI settings override file settings. | Built-in settings when omitted. |
 | `--input-mode <MODE>` | Choose archive extraction or ordinary-file sorting. | `archives` (default), `files`. |
-| `--output <PATH>` | Repository directory, or destination ZIP path when ZIP output is enabled. | `repository`; use an explicit ZIP filename with `--zip`. |
+| `--output <PATH>` | Repository directory, or destination ZIP path when ZIP output is enabled. | `organized`; use an explicit ZIP filename with `--zip`. |
 | `--rules <FILE>` | Load the central sorting policy: filename policy, ordered matchers, templates and duplicate handling. | Built-in rules: first occurrence per content hash, grouped by file type, named `{sha256}.sample`. Use `rules.files.example.toml` to retain ordinary filenames. |
 | `--zip` | Enable ZIP-only output. Refuses existing destinations and failed or interrupted runs. | Disabled. Can also be enabled with `zip = true` in config. |
 | `--zip-dir <DIRECTORY>` | Select a sorted relative directory including descendants; repeat to select several. Enables ZIP output automatically. Selections are exact and case-sensitive. | All sorted entries when omitted. CLI selections replace configured `zip_dirs`. |
@@ -74,9 +94,9 @@ TOML-only; these commands do not accept `--workers` or `--output`. See the
 | `inspect` | `[INPUTS]...` | Files or folders to search for ZIP archives; replaces configured inputs. |
 | `inspect` | `--config <FILE>` | Load inputs, recursive discovery and archive limits from TOML. Does not switch inspection to ordinary-file mode. |
 | `inspect` | `--recursive <BOOL>` | Override recursive discovery with explicit `true` or `false`; default is `true`. |
-| `stats` | `<REPOSITORY>` | Required path to an existing repository. A ZIP output is not a repository. |
-| `reorganize` | `<REPOSITORY>` | Required path to an existing repository. |
-| `reorganize` | `--rules <FILE>` | Required TOML sorting policy. |
+| `stats` | `<REPOSITORY>` | Existing repository; defaults to `./organized`. A ZIP output is not a repository. |
+| `reorganize` | `<REPOSITORY>` | Existing repository; defaults to `./organized`. |
+| `reorganize` | `--rules <FILE>` | Optional TOML policy; omitted uses built-in sample sorting rules. |
 | `reorganize` | `--dry-run` | Print the proposed layout as JSON without publishing a new view. |
 | All commands | `--help` / `-h` | Show help for that command. |
 
@@ -170,6 +190,12 @@ See the [ZIP usage notes](../README.md#sort-regular-folders-and-zip-the-result).
 
 ## Acquisition commands
 
+`bfs discover URL` uses built-in defaults and writes `./collection/inventory.jsonl`.
+Add `--config FILE` for custom limits or paths; an explicit URL overrides `source.page`.
+`bfs download` needs no config: it reads the default inventory and infers the
+source origin from its first candidate. Use the same config for discovery and
+download when enabling cross-origin links or custom paths.
+
 `bfs discover --config FILE` scans one HTML page, resolves direct `.zip` links,
 deduplicates fragment-free URLs, and atomically saves a versioned inventory.
 The inventory filename may end in `.jsonl` for compatibility with the example,
@@ -198,10 +224,10 @@ settings and CLI overrides remain supported; acquisition tables are optional.
 | `source.max_page_size` | `"5 MB"` |
 | `download.inventory` | `"./collection/inventory.jsonl"` |
 | `download.staging_dir` | `"./collection/downloads"` |
-| `download.max_files` | `100` non-cached candidates attempted per invocation |
-| `download.max_file_size` | `"1 GB"` |
-| `download.max_total_size` | `"10 GB"` body bytes per invocation, including failed transfers |
-| `download.max_staging_size` | `"20 GB"` managed payload bytes, including partials |
+| `download.max_files` | No default cap; configure a positive count to limit attempts |
+| `download.max_file_size` | No default cap; configure a readable size or integer bytes |
+| `download.max_total_size` | No default cap; configured budget includes failed transfers |
+| `download.max_staging_size` | No default cap; configured budget includes managed payloads and partials |
 | `download.concurrency` | `3`, range 1–256 |
 | `download.timeout_seconds` | `300` per transfer; network timeouts also bound individual requests |
 | `download.max_speed` | Omitted = unlimited; e.g. `"2 MB/s"`, aggregate across workers |

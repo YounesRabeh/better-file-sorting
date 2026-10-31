@@ -9,10 +9,10 @@ The default `sealed` mode stores payloads with owner-only access removed (`0000`
 Typical commands:
 
 ```text
-bfs inspect ./downloads
-bfs ingest ./downloads --output ./repository --rules ./rules.toml
-bfs stats ./repository
-bfs reorganize ./repository --rules ./rules.toml
+bfs inspect ./incoming
+bfs ingest ./incoming --output ./organized --rules ./rules.toml
+bfs stats ./organized
+bfs reorganize ./organized --rules ./rules.toml
 ```
 
 See the repository README and `config.example.toml` for limits, passwords, and security modes. Releases and CI support Linux only; no Windows or macOS executables are distributed.

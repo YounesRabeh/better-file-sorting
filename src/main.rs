@@ -6,7 +6,7 @@
 //! operations. Structured results go to stdout; diagnostics go to stderr so scripts can
 //! consume reports without mixing them with progress and error messages.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bfs::{
     cli::{Cli, Command},
     config::Config,
@@ -20,17 +20,14 @@ fn run(cli: Cli) -> Result<u8> {
                 !args.dry_run,
                 "discover performs HTTP requests; use download --dry-run for offline preview"
             );
-            let config = Config::load(Some(&args.config))?;
-            let source = config
-                .source
-                .as_ref()
-                .context("source configuration required")?;
-            let download = config
-                .download
-                .as_ref()
-                .context("download configuration required")?;
+            let config = Config::load(args.config.as_deref())?;
+            let mut source = config.source.unwrap_or_default();
+            if let Some(url) = args.url {
+                source.page = url;
+            }
+            let download = config.download.unwrap_or_default();
             let cancelled = cancellation()?;
-            let inventory = bfs::http_source::discover(source, download, &cancelled)?;
+            let inventory = bfs::http_source::discover(&source, &download, &cancelled)?;
             let parent = download
                 .inventory
                 .parent()
@@ -41,20 +38,18 @@ fn run(cli: Cli) -> Result<u8> {
             Ok(0)
         }
         Command::Download(args) => {
-            let config = Config::load(Some(&args.config))?;
-            let download = config
-                .download
-                .as_ref()
-                .context("download configuration required")?;
+            let config = Config::load(args.config.as_deref())?;
+            let download = config.download.unwrap_or_default();
             let inventory = bfs::acquisition::load_inventory(&download.inventory)?;
-            let report = if args.dry_run {
-                bfs::download::preview(download, &inventory)?
+            let report = if args.dry_run || inventory.candidates.is_empty() {
+                bfs::download::preview(&download, &inventory)?
             } else {
-                let source = config
-                    .source
-                    .as_ref()
-                    .context("source configuration required")?;
-                bfs::download::run(download, source, &inventory, cancellation()?.as_ref())?
+                let mut source = config.source.unwrap_or_default();
+                if source.page.is_empty() {
+                    // Default discovery admits one origin, recover it from the saved links.
+                    source.page = inventory.candidates[0].url.clone();
+                }
+                bfs::download::run(&download, &source, &inventory, cancellation()?.as_ref())?
             };
             let incomplete = report.failed > 0 || report.not_attempted > 0;
             let code = if !incomplete {
@@ -106,6 +101,11 @@ fn run(cli: Cli) -> Result<u8> {
             if let Some(value) = args.recursive {
                 config.recursive = value;
             }
+            if config.inputs.is_empty() {
+                config
+                    .inputs
+                    .push(bfs::config::DEFAULT_INPUT_DIRECTORY.into());
+            }
             config.validate()?;
             let archives =
                 bfs::discovery::discover(&config.inputs, config.recursive, &config.output)?;
@@ -130,7 +130,7 @@ fn run(cli: Cli) -> Result<u8> {
             rules,
             dry_run,
         } => {
-            let rules = bfs::rules::Rules::load(Some(&rules))?;
+            let rules = bfs::rules::Rules::load(rules.as_deref())?;
             let repo = bfs::storage::Repository::existing(&repository)?;
             let records = bfs::metadata::load(repo.root())?;
             let plan = rules.plan(&records)?;

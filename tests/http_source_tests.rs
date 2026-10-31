@@ -118,3 +118,110 @@ fn rate_limited_origin_is_not_requested_again() {
             .contains("origin rate limited")
     );
 }
+
+#[test]
+fn discover_url_cli_writes_default_inventory_without_config() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        process::Command,
+    };
+    let server = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", server.local_addr().unwrap());
+    let worker = std::thread::spawn(move || {
+        let (mut stream, _) = server.accept().unwrap();
+        let mut request = [0; 4096];
+        assert!(stream.read(&mut request).unwrap() > 0);
+        let body = "<a href='/fixture.zip'>Fixture ZIP</a>";
+        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+    });
+    let temp = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_bfs"))
+        .args(["discover", &url])
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+    worker.join().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let inventory =
+        bfs::acquisition::load_inventory(&temp.path().join("collection/inventory.jsonl")).unwrap();
+    assert_eq!(inventory.candidates.len(), 1);
+    assert_eq!(inventory.candidates[0].title, "Fixture ZIP");
+}
+
+#[test]
+fn default_workflow_needs_no_config_file() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        os::unix::fs::PermissionsExt,
+        process::Command,
+    };
+    let mut archive = std::io::Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut archive);
+        writer
+            .start_file("hello.txt", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"hello").unwrap();
+        writer.finish().unwrap();
+    }
+    let server = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", server.local_addr().unwrap());
+    let worker = std::thread::spawn(move || {
+        for (body, content_type) in [
+            (b"<a href='/fixture.zip'>Fixture</a>".to_vec(), "text/html"),
+            (archive.into_inner(), "application/zip"),
+        ] {
+            let (mut stream, _) = server.accept().unwrap();
+            let mut request = [0; 4096];
+            assert!(stream.read(&mut request).unwrap() > 0);
+            write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len()).unwrap();
+            stream.write_all(&body).unwrap();
+        }
+    });
+    let temp = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let result = Command::new(env!("CARGO_BIN_EXE_bfs"))
+            .args(args)
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        result
+    };
+    run(&["discover", &url]);
+    run(&["download", "--dry-run"]);
+    run(&["download"]);
+    worker.join().unwrap();
+    let config = bfs::acquisition::DownloadConfig {
+        staging_dir: temp.path().join("collection/downloads"),
+        ..Default::default()
+    };
+    let control = config.staging_dir.join("control");
+    let receipt_path = std::fs::read_dir(control)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|e| e == "json"))
+        .unwrap();
+    let receipt: bfs::acquisition::DownloadReceipt =
+        bfs::acquisition::load_json(&receipt_path).unwrap();
+    std::fs::set_permissions(
+        config.staging_dir.join(receipt.path),
+        std::fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    run(&["ingest", "--dry-run"]);
+    run(&["ingest"]);
+    assert!(temp.path().join("organized/security.json").is_file());
+    run(&["stats"]);
+    run(&["reorganize", "--dry-run"]);
+}

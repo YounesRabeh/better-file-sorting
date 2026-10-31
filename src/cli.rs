@@ -22,7 +22,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Discover direct ZIP links from an HTTP page
-    Discover(Acquire),
+    Discover(Discover),
     /// Download policy-selected ZIPs into sealed staging
     Download(Acquire),
     /// Classify and sort archive contents or ordinary files; optionally ZIP the output
@@ -30,12 +30,17 @@ pub enum Command {
     /// Inspect archive metadata without extracting payloads
     Inspect(Inspect),
     /// Summarize stored metadata without reading payloads
-    Stats { repository: PathBuf },
+    Stats {
+        /// Repository to summarize; defaults to ./organized
+        #[arg(default_value = crate::config::DEFAULT_REPOSITORY)]
+        repository: PathBuf,
+    },
     /// Build a new view from metadata without unlocking payloads
     Reorganize {
+        #[arg(default_value = crate::config::DEFAULT_REPOSITORY)]
         repository: PathBuf,
         #[arg(long)]
-        rules: PathBuf,
+        rules: Option<PathBuf>,
         #[arg(long)]
         dry_run: bool,
     },
@@ -90,8 +95,23 @@ pub struct Inspect {
 
 #[derive(Debug, Args)]
 pub struct Acquire {
+    /// Optional runtime TOML; defaults read ./collection/inventory.jsonl
     #[arg(long)]
-    pub config: PathBuf,
+    pub config: Option<PathBuf>,
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+/// Discovery accepts a direct page URL, optional runtime overrides, or both.
+#[derive(Debug, Args)]
+pub struct Discover {
+    /// HTTP(S) page URL; overrides source.page when a config is supplied
+    #[arg(required_unless_present = "config")]
+    pub url: Option<String>,
+    /// Optional runtime TOML; omitted settings use built-in acquisition defaults
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+    /// Discovery requires network access; use download --dry-run for offline selection
     #[arg(long)]
     pub dry_run: bool,
 }

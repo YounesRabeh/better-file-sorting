@@ -39,3 +39,59 @@ fn rejects_invalid_configuration_before_output_creation() {
     assert!(!status.status.success());
     assert!(!output.exists());
 }
+
+#[test]
+fn discover_accepts_url_without_config() {
+    use clap::Parser;
+    assert!(bfs::cli::Cli::try_parse_from(["bfs", "discover", "https://example.org/"]).is_ok());
+    assert!(
+        bfs::cli::Cli::try_parse_from(["bfs", "discover", "--config", "collection.toml"]).is_ok()
+    );
+    assert!(bfs::cli::Cli::try_parse_from(["bfs", "discover"]).is_err());
+    assert!(bfs::cli::Cli::try_parse_from(["bfs", "download"]).is_ok());
+}
+
+#[test]
+fn commands_accept_default_settings_without_config() {
+    use clap::Parser;
+    for command in ["download", "ingest", "inspect", "stats", "reorganize"] {
+        assert!(
+            bfs::cli::Cli::try_parse_from(["bfs", command]).is_ok(),
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn local_default_workflow_uses_incoming_and_organized() {
+    use std::io::Write;
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("incoming")).unwrap();
+    let file = std::fs::File::create(temp.path().join("incoming/example.zip")).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    zip.start_file("hello.txt", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(b"hello").unwrap();
+    zip.finish().unwrap();
+    for args in [
+        vec!["inspect"],
+        vec!["ingest"],
+        vec!["stats"],
+        vec!["reorganize", "--dry-run"],
+    ] {
+        let result = Command::new(env!("CARGO_BIN_EXE_bfs"))
+            .args(&args)
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    assert!(temp.path().join("organized/security.json").is_file());
+    assert!(temp.path().join("incoming/example.zip").is_file());
+    assert!(!temp.path().join("repository").exists());
+    assert!(!temp.path().join("downloads").exists());
+}

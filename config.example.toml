@@ -4,9 +4,9 @@
 # Reference: docs/configuration.md; CLI overrides TOML.
 
 # Local files or directories to ingest; explicit inputs take precedence over download receipts.
-inputs = ["downloads"]
+inputs = ["incoming"]
 # Destination repository, ZIP file, or new directory for separate ZIP exports.
-output = "repository"
+output = "organized"
 # Use archives to extract ZIP entries, or files to sort ordinary files (including ZIPs unchanged).
 # input_mode = "files"
 # Export a ZIP instead of a repository; output must name a new ZIP file.

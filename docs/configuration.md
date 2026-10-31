@@ -114,3 +114,43 @@ Matchers in one rule must all match. Template fields include `file_type`,
 `encrypted`, `duplicate`, `source_archive`, `ingest_date`, and `occurrence_id`.
 Archive-derived records require `.sample` filenames. Paths are validated and
 collisions resolved by the existing planner.
+
+## No-config workflow
+
+All commands support built-in operational defaults. Discovery still needs a URL;
+other commands need existing input data, an inventory or a repository. See the
+[default commands table](commands.md#defaults-without-configuration).
+Download presets in `collection.example.toml` intentionally impose limits; built-in
+transfer defaults impose none. Pass a config to restore application byte/count caps.
+Timeouts, origin restrictions, sealing and extraction limits remain in force.
+Reorganize can omit `--rules` to use built-in policies rather than loading a file.
+
+## Working directory layout
+
+```text
+working-directory/
+├── incoming/                       # Optional manually supplied files or ZIPs
+├── collection/
+│   ├── inventory.jsonl             # Discovery inventory (versioned JSON)
+│   └── downloads/
+│       ├── control/                # Download lock and completion receipts
+│       └── payloads/               # Sealed downloaded ZIPs grouped by title
+└── organized/                      # Default managed BFS repository
+    ├── security.json
+    ├── .lock
+    ├── .staging/                   # Temporary ingest/view work
+    ├── objects/                    # Content-addressed, deduplicated payloads
+    ├── manifests/                  # Per-run occurrence metadata
+    ├── reports/                    # Ingest summaries and failure journals
+    └── views/                      # Layout generations, indexes and CURRENT pointer
+```
+
+`discover` writes the inventory; `download` adds payloads and receipts; `ingest`
+creates the repository after explicitly unlocking downloaded inputs. `stats` reads
+metadata and prints JSON without creating a new report file. `incoming` is the
+fallback for local inputs, not an intermediate download directory.
+
+The defaults were renamed from `downloads` and `repository`. Existing directories
+are never renamed or moved. Use explicit input/output paths, a runtime config,
+or `bfs stats ./repository` to continue working with an older layout. Explicit
+settings take precedence; `collection/downloads` remains unchanged.
