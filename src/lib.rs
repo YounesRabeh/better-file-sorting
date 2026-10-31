@@ -12,3 +12,5 @@ pub mod report;
 pub mod rules;
 pub mod security;
 pub mod storage;
+
+pub mod acquisition;

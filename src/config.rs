@@ -62,6 +62,8 @@ impl Default for Limits {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    pub source: Option<crate::acquisition::SourceConfig>,
+    pub download: Option<crate::acquisition::DownloadConfig>,
     pub input_mode: InputMode,
     pub zip: bool,
     pub zip_dirs: Vec<String>,
@@ -81,6 +83,8 @@ impl Default for Config {
     /// Return configuration defaults with bounded worker parallelism.
     fn default() -> Self {
         Self {
+            source: None,
+            download: None,
             input_mode: InputMode::Archives,
             zip: false,
             zip_dirs: vec![],
