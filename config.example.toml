@@ -1,24 +1,53 @@
+# LOCAL INGEST — input paths, output, workers, security and extraction limits.
+# Usage: bfs ingest --config config.toml
+# Sorting rules belong in a separate file referenced by rules below.
+# Reference: docs/configuration.md; CLI overrides TOML.
+
+# Local files or directories to ingest; explicit inputs take precedence over download receipts.
 inputs = ["downloads"]
+# Destination repository, ZIP file, or new directory for separate ZIP exports.
 output = "repository"
-# input_mode = "files" # Default: "archives"; files mode sorts ZIPs as files too
-# zip = true # output must then name a new ZIP file, e.g. "sorted.zip"
-# zip_dirs = ["documents/pdf", "other"] # Enables ZIP output for these sorted directories
-# zip_each_dir = true # Separate ZIPs in a new output directory; all top-level dirs if none selected
-# output_password_file = "output-password.txt" # 0600, exactly one nonempty line
-# staging_dir = "/path/to/encrypted/scratch" # Existing directory for ZIP/preview staging
+# Use archives to extract ZIP entries, or files to sort ordinary files (including ZIPs unchanged).
+# input_mode = "files"
+# Export a ZIP instead of a repository; output must name a new ZIP file.
+# zip = true
+# Export these sorted directories and descendants; selecting directories enables ZIP output.
+# zip_dirs = ["documents/pdf", "other"]
+# Create one ZIP per selected directory, or per top-level sorted directory if none are selected.
+# zip_each_dir = true
+# Private 0600 file containing exactly one nonempty password for AES-256 ZIP output.
+# output_password_file = "output-password.txt"
+# Existing scratch directory for private ZIP-export and preview temporary storage.
+# staging_dir = "/path/to/encrypted/scratch"
+# Local discovery and parallel ingest
+# Search input directories recursively rather than only their immediate children.
 recursive = true
+# Number of parallel ingest workers; valid range is 1 to 256.
 workers = 4
-# password_file = "passwords.txt" # Private local file, one candidate per line
+# Private 0600 file containing candidate input ZIP passwords, one per line.
+# password_file = "passwords.txt"
+# Path to the TOML policy defining matching, destination paths and duplicate handling.
 # rules = "rules.toml"
 
+# Repository permissions
 [security]
+# Use sealed for payload permissions 0000, or standard for owner read/write permissions 0600.
 mode = "sealed"
+# Require owner-only directories (0700); disabling this safeguard is rejected.
 restrict_directories = true
+# Must remain false; BFS never automatically restores access to sealed payloads.
 allow_automatic_unsealing = false
 
+# Extraction limits (not download budgets)
 [limits]
-max_entry_bytes = 268435456
-max_archive_bytes = 1073741824
-max_input_bytes = 1073741824
+# Sizes accept readable units or integer bytes. MiB/GiB are binary; MB/GB are decimal.
+# Maximum expanded size of one ZIP entry or ordinary input file; readable units or integer bytes.
+max_entry_bytes = "256 MiB"
+# Maximum total expanded bytes per ZIP; also caps ordinary input file size.
+max_archive_bytes = "1 GiB"
+# Maximum compressed ZIP input size or ordinary file size; independent of expansion limits.
+max_input_bytes = "1 GiB"
+# Maximum entries per ZIP, or discovered input files in files mode.
 max_entries = 10000
+# Maximum permitted uncompressed-to-compressed size ratio for each ZIP entry.
 max_expansion_ratio = 1000

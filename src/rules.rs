@@ -85,7 +85,11 @@ pub struct Matcher {
     pub original_extension: Option<String>,
     pub encrypted: Option<bool>,
     pub duplicate: Option<bool>,
+    /// File-size bound as integer bytes or a readable size such as "2 MiB".
+    #[serde(deserialize_with = "crate::acquisition::deserialize_optional_bytes")]
     pub min_size: Option<u64>,
+    /// File-size bound as integer bytes or a readable size such as "2 MiB".
+    #[serde(deserialize_with = "crate::acquisition::deserialize_optional_bytes")]
     pub max_size: Option<u64>,
 }
 impl Matcher {

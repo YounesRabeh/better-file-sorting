@@ -46,11 +46,18 @@ impl Default for Security {
         }
     }
 }
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Limits {
+    /// Maximum extracted entry size; integer bytes or a readable size such as 256 MiB.
+    #[serde(deserialize_with = "crate::acquisition::deserialize_bytes")]
     pub max_entry_bytes: u64,
+    /// Maximum aggregate expanded archive size; independent of compressed input size.
+    #[serde(deserialize_with = "crate::acquisition::deserialize_bytes")]
     pub max_archive_bytes: u64,
+    /// Maximum input file size; accepts the same units as download size limits.
+    #[serde(deserialize_with = "crate::acquisition::deserialize_bytes")]
     pub max_input_bytes: u64,
     pub max_entries: usize,
     pub max_expansion_ratio: u64,

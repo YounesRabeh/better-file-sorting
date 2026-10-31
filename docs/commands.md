@@ -1,6 +1,6 @@
 # Command reference
 
-[Documentation hub](README.md) · [Project README](../README.md)
+[Documentation hub](README.md) · [Configuration guide](configuration.md) · [Project README](../README.md)
 
 Examples use `bfs` on your `PATH`. After a local build, use
 `target/release/bfs` instead. Put command options after the command name.
@@ -9,6 +9,9 @@ Examples use `bfs` on your `PATH`. After a local build, use
 
 | Command | What it does | Example |
 | --- | --- | --- |
+| `discover --config <FILE>` | Scan one HTML page and save ZIP links/titles; no resource bodies downloaded. | `bfs discover --config collection.toml` |
+| `download --config <FILE>` | Apply policies and transfer ZIPs into sealed staging. | `bfs download --config collection.toml` |
+| `download --config <FILE> --dry-run` | Offline candidate selection preview; no requests or downloads. | `bfs download --config collection.toml --dry-run` |
 | `ingest [INPUTS]...` | Extract ZIP inputs, classify their contents, deduplicate and sort into a repository. Sources remain untouched. | `bfs ingest ./downloads --output ./repository --rules ./rules.toml` |
 | `ingest --input-mode files [INPUTS]...` | Sort ordinary files and folders using the same policies. ZIP files are sorted as files, without extracting them. | `bfs ingest ./documents --input-mode files --output ./repository --rules ./rules.toml` |
 | `ingest --zip [INPUTS]...` | Sort inputs and publish only a compressed ZIP, without keeping a repository. Works with either input mode. | `bfs ingest ./documents --input-mode files --zip --output ./sorted.zip --rules ./rules.toml` |
@@ -18,11 +21,36 @@ Examples use `bfs` on your `PATH`. After a local build, use
 | `help [COMMAND]` | Show general help or help for a command; `--help` / `-h` also works. | `bfs help ingest` |
 | `--version` / `-V` | Print the installed version. | `bfs --version` |
 
+## Discovery and download options
+
+| Command | Option | Required / accepted values | Effect |
+| --- | --- | --- | --- |
+| `discover` | `--config <FILE>` | Required; runtime TOML with `[source]` and `[download]` | Reads the page and writes the configured inventory |
+| `discover` | `--dry-run` | Parsed but rejected | Discovery requires requests; use download preview for offline selection |
+| `download` | `--config <FILE>` | Required; `[download]`, plus `[source]` for transfers | Reads the saved discovery inventory |
+| `download` | `--dry-run` | Optional flag | Shows selected candidates without network or staging writes |
+| Both | `--help`, `-h` | Optional | Shows command help |
+
+Transfer settings such as speed, request spacing, ordering and concurrency are
+TOML-only; these commands do not accept `--workers` or `--output`. See the
+[configuration guide](configuration.md) for field ownership and worker settings.
+
+## Common workflows
+
+| Goal | Commands / next step |
+| --- | --- |
+| Download a web collection | `bfs discover --config collection.toml`, then `bfs download --config collection.toml` |
+| Sort downloaded contents | Explicitly unlock all receipt-owned ZIPs to `0600`, then `bfs ingest --config collection.toml` |
+| Preview before writing | Download: `--dry-run` selects candidates offline. Ingest: `--dry-run` reads payloads and plans final destinations. |
+| Sort local files | `bfs ingest ./documents --input-mode files --rules rules.files.example.toml --output repository` |
+| Read ZIP metadata only | `bfs inspect ./downloads` |
+| Change an existing repository layout | `bfs reorganize ./repository --rules rules.toml --dry-run`, then omit `--dry-run` |
+
 ## Ingest options
 
 | Argument or option | Meaning | Default / accepted values |
 | --- | --- | --- |
-| `[INPUTS]...` | One or more file or folder paths. Explicit paths replace configured inputs. | Configured `inputs`; at least one input is needed. |
+| `[INPUTS]...` | One or more file or folder paths. Explicit paths replace configured inputs. | Configured `inputs`, or completed download receipts when no explicit inputs exist. |
 | `--config <FILE>` | Load runtime settings from TOML. Explicit CLI settings override file settings. | Built-in settings when omitted. |
 | `--input-mode <MODE>` | Choose archive extraction or ordinary-file sorting. | `archives` (default), `files`. |
 | `--output <PATH>` | Repository directory, or destination ZIP path when ZIP output is enabled. | `repository`; use an explicit ZIP filename with `--zip`. |
@@ -183,9 +211,10 @@ settings and CLI overrides remain supported; acquisition tables are optional.
 | `download.order` | `"ascending"` or `"descending"` |
 | `download.directory` | `"{title}"`, `"{name}"`, or safe literal relative path |
 
-Sizes accept positive integers with B/KB/MB/GB/TB (decimal), or KiB/MiB/GiB/TiB
-(binary). Fractions, missing units, overflow and zero limits are rejected. Speed
-uses the same units followed by `/s`; it limits application body reads, not exact
+Size settings accept integer bytes or strings with B/KB/MB/GB/TB (decimal),
+or KiB/MiB/GiB/TiB (binary). Fractions, unitless strings, overflow and zero
+resource limits are rejected. Speed accepts these units followed by `/s`, or
+integer bytes per second; it limits application body reads, not exact
 TCP traffic. Request caps reset between command invocations. No persistent scheduler.
 
 Policies use exactly one of `title_contains` or `name_contains`, and `action`
@@ -214,3 +243,12 @@ At an aggregate byte/staging cap, unknown-length responses fail closed if EOF
 cannot be verified without another read. Leave budget headroom for such servers.
 All completed receipted payloads must be explicitly unlocked before implicit
 receipt-driven ingest; it does not select a subset of completion receipts.
+
+Extraction `[limits]` fields `max_entry_bytes`, `max_archive_bytes`, and
+`max_input_bytes` accept integer bytes or readable sizes such as `"256 MiB"`
+and `"1 GiB"`. MB/GB use decimal units; MiB/GiB use binary units.
+`max_entries` and `max_expansion_ratio` remain unitless integers.
+
+Rule matchers `min_size` and `max_size` also accept readable sizes or integer
+bytes (for example `max_size = "64 KiB"` or `max_size = 65536`). Numeric zero
+remains valid for rule bounds. Reports and stored metadata retain numeric bytes.

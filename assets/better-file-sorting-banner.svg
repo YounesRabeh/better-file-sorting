@@ -83,8 +83,7 @@
     <rect x="778" y="284" width="418" height="53" rx="10" fill="#17352E" stroke="#335D4F"/>
     <g fill="none" stroke="#84DEC1" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
       <path d="M795 298H808L814 304V323H795Z"/>
-      <path d="M808 298V304H814M803 302V315M800 307H806M800 312H806"/>
-      <rect x="802" y="316" width="4" height="5" rx="1"/>
+      <path d="M808 298V304H814M801 310H808M801 315H808"/>
       <rect x="1042" y="308" width="12" height="10" rx="2"/>
       <path d="M1045 308V304A3 3 0 0 1 1051 304V308"/>
     </g>

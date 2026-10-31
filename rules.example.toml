@@ -1,41 +1,69 @@
+# ARCHIVE SORTING POLICY — safe .sample names for extracted ZIP entries.
+# Usage: bfs ingest ./downloads --rules rules.toml
+# This is a rules file, not a --config runtime file.
+# Reference: docs/configuration.md#sorting-rule-settings.
+
+# Rules schema version; currently only version 1 is supported.
 version = 1
 
 [organization]
-filename_policy = "samples" # .sample required; use rules.files.example.toml for regular files
+# Use samples to enforce .sample names; regular preserves ordinary names in files mode only.
+filename_policy = "samples"
+# Keep the first identical payload; alternatives are all, only_duplicates, or separate.
 duplicates = "first_only"
-view_mode = "hardlink" # or "manifest": no payload links
+# Use hardlink for links to stored payloads (retaining permissions), or manifest for metadata only.
+view_mode = "hardlink"
+# Destination directory template used when no matching rule overrides it.
 default_directory = "{file_type}"
+# Destination filename template used when no matching rule overrides it.
 default_filename = "{sha256}.sample"
 
 [[rules]]
+# Human-readable rule label; rules are evaluated in order and the first match wins.
 name = "Encrypted PDFs"
 [rules.match]
+# Match detected content type, such as pdf, pe (Windows executable), or elf (Linux executable).
 file_type = "pdf"
+# Match whether the original input ZIP entry was encrypted.
 encrypted = true
 [rules.output]
+# Sorted destination directory template for entries matching this rule.
 directory = "encrypted/pdf"
+# Filename template for entries matching this rule; archive-derived names must end in .sample.
 filename = "{sha256}.sample"
 
 [[rules]]
+# Human-readable rule label; rules are evaluated in order and the first match wins.
 name = "Windows executables"
 [rules.match]
+# Match detected content type, such as pdf, pe (Windows executable), or elf (Linux executable).
 file_type = "pe"
 [rules.output]
+# Sorted destination directory template for entries matching this rule.
 directory = "executables/windows"
+# Filename template for entries matching this rule; archive-derived names must end in .sample.
 filename = "{original_stem}-{sha256}.sample"
 
 [[rules]]
+# Human-readable rule label; rules are evaluated in order and the first match wins.
 name = "Linux executables"
 [rules.match]
+# Match detected content type, such as pdf, pe (Windows executable), or elf (Linux executable).
 file_type = "elf"
 [rules.output]
+# Sorted destination directory template for entries matching this rule.
 directory = "executables/linux"
+# Filename template for entries matching this rule; archive-derived names must end in .sample.
 filename = "{sha256}.sample"
 
 [[rules]]
+# Human-readable rule label; rules are evaluated in order and the first match wins.
 name = "Small samples"
 [rules.match]
-max_size = 65536
+# Match payloads no larger than this size; readable units or integer bytes.
+max_size = "64 KiB"
 [rules.output]
+# Sorted destination directory template for entries matching this rule.
 directory = "small/{file_type}"
+# Filename template for entries matching this rule; archive-derived names must end in .sample.
 filename = "{sha256}.sample"

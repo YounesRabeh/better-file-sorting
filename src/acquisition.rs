@@ -45,6 +45,54 @@ pub fn parse_bytes(value: &str) -> Result<u64> {
     ensure!(size > 0, "byte quantity must be positive");
     Ok(size)
 }
+/// Shared TOML boundary: user quantities may be integer bytes or unit-bearing strings.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Quantity {
+    Bytes(u64),
+    Readable(String),
+}
+impl Quantity {
+    fn bytes<E: serde::de::Error>(self) -> std::result::Result<u64, E> {
+        match self {
+            Self::Bytes(bytes) => Ok(bytes),
+            Self::Readable(value) => parse_bytes(&value).map_err(E::custom),
+        }
+    }
+}
+/// Decode byte quantities while retaining numeric internal storage for ingest and rules.
+pub(crate) fn deserialize_bytes<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<u64, D::Error> {
+    Quantity::deserialize(d)?.bytes()
+}
+/// Preserve absent rule bounds and accept both representations for present bounds.
+pub(crate) fn deserialize_optional_bytes<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Option<u64>, D::Error> {
+    Option::<Quantity>::deserialize(d)?
+        .map(Quantity::bytes)
+        .transpose()
+}
+/// Normalize legacy numeric sizes to the existing acquisition string representation.
+fn deserialize_size_text<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<String, D::Error> {
+    Ok(match Quantity::deserialize(d)? {
+        Quantity::Bytes(bytes) => format!("{bytes} B"),
+        Quantity::Readable(value) => value,
+    })
+}
+/// Numeric speed values mean bytes per second; readable rates retain their /s suffix.
+fn deserialize_speed_text<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Option<String>, D::Error> {
+    Ok(Option::<Quantity>::deserialize(d)?.map(|q| match q {
+        Quantity::Bytes(bytes) => format!("{bytes} B/s"),
+        Quantity::Readable(value) => value,
+    }))
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SourceConfig {
@@ -53,6 +101,7 @@ pub struct SourceConfig {
     /// Whether requests and redirects must remain on the page origin.
     pub same_origin: bool,
     /// Maximum HTML response body, expressed with a readable byte unit.
+    #[serde(deserialize_with = "deserialize_size_text")]
     pub max_page_size: String,
 }
 impl Default for SourceConfig {
@@ -102,16 +151,20 @@ pub struct DownloadConfig {
     /// Maximum number of uncached candidates attempted per invocation.
     pub max_files: usize,
     /// Maximum downloaded payload size, independent of extraction limits.
+    #[serde(deserialize_with = "deserialize_size_text")]
     pub max_file_size: String,
     /// Aggregate body-byte budget, including failed transfers.
+    #[serde(deserialize_with = "deserialize_size_text")]
     pub max_total_size: String,
     /// Managed payload storage budget, including existing partial files.
+    #[serde(deserialize_with = "deserialize_size_text")]
     pub max_staging_size: String,
     /// Maximum number of transfer workers sharing all aggregate limits.
     pub concurrency: usize,
     /// Transfer timeout in seconds, including pacing waits.
     pub timeout_seconds: u64,
     /// Optional aggregate body-read rate; omission leaves speed uncapped.
+    #[serde(deserialize_with = "deserialize_speed_text")]
     pub max_speed: Option<String>,
     /// Minimum spacing between request starts, including redirect hops.
     pub min_request_interval_ms: u64,
