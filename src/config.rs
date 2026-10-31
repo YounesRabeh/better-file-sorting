@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 Younidev. See LICENSE for license terms.
+
 //! Loads runtime TOML settings, applies CLI overrides and validates ingest constraints.
 //! Defaults preserve private storage and bounded extraction. Optional acquisition tables
 //! leave local workflows unchanged; receipt-driven inputs are resolved only when explicit

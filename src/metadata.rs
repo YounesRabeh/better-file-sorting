@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 Younidev. See LICENSE for license terms.
+
 //! Stores and loads occurrence manifests describing ingested content and its origins.
 //! Content hashes identify objects; occurrence identities retain distinct source events.
 //! Loading validates bounded records, reconciles duplicates and tolerates interrupted

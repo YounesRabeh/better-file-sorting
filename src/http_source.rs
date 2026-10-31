@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 Younidev. See LICENSE for license terms.
+
 //! Discovers direct ZIP links in HTML and centralizes HTTP request restrictions.
 //! URL validation, redirect checks, origin boundaries, request caps and spacing are
 //! shared by page discovery and payload transfers. HTML parsing resolves relative links

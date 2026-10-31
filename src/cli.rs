@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 Younidev. See LICENSE for license terms.
+
 //! Declares the public command-line interface and clap argument metadata.
 //! Commands separate discovery, download, ingest, inspection, statistics and reorganization.
 //! Parsing does not perform filesystem or network work; main dispatches commands and

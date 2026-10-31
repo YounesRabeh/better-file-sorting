@@ -2,7 +2,7 @@
 name = "bfs"
 version = "0.4.0"
 edition = "2024"
-license = "BSD-3-Clause"
+license = "GPL-3.0-only"
 description = "Metadata-driven, permission-restricted ZIP sample organizer"
 
 [dependencies]

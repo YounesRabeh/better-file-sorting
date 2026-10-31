@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 Younidev. See LICENSE for license terms.
+
 //! Runs the BFS command-line application and translates outcomes into process exit codes.
 //! The dispatcher connects parsed arguments to configuration, cancellation and library
 //! operations. Structured results go to stdout; diagnostics go to stderr so scripts can

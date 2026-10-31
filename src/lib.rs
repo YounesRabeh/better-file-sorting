@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 Younidev. See LICENSE for license terms.
+
 //! Exposes the BFS library modules used by the CLI and integration tests.
 //! Acquisition produces verified local inputs; the existing pipeline handles extraction,
 //! classification, content-addressed storage, rule planning and optional ZIP export.

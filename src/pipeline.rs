@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 Younidev. See LICENSE for license terms.
+
 //! Coordinates discovery, extraction, classification, storage, metadata and organization.
 //! Ingest uses bounded workers and durable journals; preview runs the same planning
 //! logic in disposable storage. ZIP publication requires successful processing, and

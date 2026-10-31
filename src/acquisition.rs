@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 Younidev. See LICENSE for license terms.
+
 //! Defines the acquisition configuration, policy selection, and durable transfer inventory.
 //! Discovery and download share these records; ingestion consumes completion receipts only
 //! after the user explicitly unlocks payloads and their size and SHA-256 are verified.
