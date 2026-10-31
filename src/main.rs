@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bfs::{
     cli::{Cli, Command},
     config::Config,
@@ -7,6 +7,32 @@ use clap::Parser;
 /// Dispatch one parsed CLI command and return its process exit code.
 fn run(cli: Cli) -> Result<u8> {
     match cli.command {
+        Command::Discover(args) => {
+            anyhow::ensure!(
+                !args.dry_run,
+                "discover performs HTTP requests; use download --dry-run for offline preview"
+            );
+            let config = Config::load(Some(&args.config))?;
+            let source = config
+                .source
+                .as_ref()
+                .context("source configuration required")?;
+            let download = config
+                .download
+                .as_ref()
+                .context("download configuration required")?;
+            let cancelled = cancellation()?;
+            let inventory = bfs::http_source::discover(source, download, &cancelled)?;
+            let parent = download
+                .inventory
+                .parent()
+                .unwrap_or(std::path::Path::new("."));
+            bfs::acquisition::private_tree(parent)?;
+            bfs::acquisition::save_json(&download.inventory, &inventory)?;
+            println!("{}", serde_json::to_string_pretty(&inventory)?);
+            Ok(0)
+        }
+        Command::Download(_) => anyhow::bail!("download implementation pending"),
         Command::Ingest(args) => {
             let config = Config::for_ingest(&args)?;
             let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -98,4 +124,11 @@ fn main() -> std::process::ExitCode {
             std::process::ExitCode::from(1)
         }
     }
+}
+
+fn cancellation() -> Result<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+    let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let signal = flag.clone();
+    ctrlc::set_handler(move || signal.store(true, std::sync::atomic::Ordering::Relaxed))?;
+    Ok(flag)
 }

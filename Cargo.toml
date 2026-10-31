@@ -24,6 +24,9 @@ rayon = "1"
 chrono = "0.4"
 unicode-normalization = "0.1"
 ctrlc = "3"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+scraper = "0.24"
+url = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { version = "1", features = ["fs"] }

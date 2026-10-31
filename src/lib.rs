@@ -14,3 +14,5 @@ pub mod security;
 pub mod storage;
 
 pub mod acquisition;
+
+pub mod http_source;

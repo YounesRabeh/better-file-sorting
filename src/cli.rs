@@ -13,6 +13,10 @@ pub struct Cli {
 }
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Discover direct ZIP links from an HTTP page
+    Discover(Acquire),
+    /// Download policy-selected ZIPs into sealed staging
+    Download(Acquire),
     /// Classify and sort archive contents or ordinary files; optionally ZIP the output
     Ingest(Ingest),
     /// Inspect archive metadata without extracting payloads
@@ -74,4 +78,12 @@ pub struct Inspect {
     pub config: Option<PathBuf>,
     #[arg(long, action = clap::ArgAction::Set)]
     pub recursive: Option<bool>,
+}
+
+#[derive(Debug, Args)]
+pub struct Acquire {
+    #[arg(long)]
+    pub config: PathBuf,
+    #[arg(long)]
+    pub dry_run: bool,
 }

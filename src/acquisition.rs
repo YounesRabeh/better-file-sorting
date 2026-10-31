@@ -285,3 +285,15 @@ pub fn load_inventory(path: &Path) -> Result<Inventory> {
     }
     Ok(inventory)
 }
+
+/// Create only missing private directories, checking all existing ancestors for links.
+pub fn private_tree(path: &Path) -> Result<()> {
+    crate::discovery::check_path(path)?;
+    if path.is_dir() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        private_tree(parent)?;
+    }
+    crate::security::private_dir(path)
+}
