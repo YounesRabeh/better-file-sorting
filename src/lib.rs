@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Younidev. See LICENSE for license terms.
 
 //! Exposes the BFS library modules used by the CLI and integration tests.

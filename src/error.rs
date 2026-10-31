@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Younidev. See LICENSE for license terms.
 
 //! Defines structured configuration errors exposed by the library and command dispatcher.

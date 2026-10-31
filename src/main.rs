@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Younidev. See LICENSE for license terms.
 
 //! Runs the BFS command-line application and translates outcomes into process exit codes.

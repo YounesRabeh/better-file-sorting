@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Younidev. See LICENSE for license terms.
 
 //! Materializes rule-planned repository views without changing canonical stored objects.
