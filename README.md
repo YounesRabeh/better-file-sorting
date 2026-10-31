@@ -111,7 +111,7 @@ planned destinations, source paths, and duplicate counts without publishing
 output. The export refuses existing ZIP destinations and failed or interrupted
 runs. Already-compressed files may shrink little or produce a larger ZIP.
 
-## Download collections (0.4.0)
+## Download collections
 
 Use [collection.example.toml](collection.example.toml) to discover direct ZIP links
 on one HTTP(S) page, preview selection, and download into sealed private staging:
@@ -122,8 +122,9 @@ bfs download --config collection.toml --dry-run
 bfs download --config collection.toml
 ```
 
-Downloads have `0000` permissions. Explicitly unlock all receipt-owned ZIPs
-before ingestion, using their paths in the download report/control receipts:
+> [!NOTE]
+> Downloads have `0000` permissions. Explicitly unlock all receipt-owned ZIPs
+> before ingestion, using their paths in the download report/control receipts:
 
 ```sh
 chmod 600 ./collection/downloads/payloads/TITLE/FILE.zip
@@ -183,11 +184,9 @@ previous views. A ZIP export is an output layout, not a repository backup.
 
 ### ZIP output and passwords
 
-`--password-file` supplies candidates for decrypting input archives.
-`--output-password-file` independently sets an output ZIP password. Password
-files must have `0600` permissions; an output password file must contain exactly
-one nonempty password line. Configured password files and their hard links are
-excluded from discovered inputs.
+`--password-file` decrypts inputs; `--output-password-file` encrypts output with
+AES-256. Both require `0600` permissions; the output password file must contain
+exactly one nonempty line. Password files and their hard links are excluded from inputs.
 
 <details>
 <summary><strong>Commands</strong></summary>
@@ -204,19 +203,16 @@ excluded from discovered inputs.
 
 </details>
 
-`--zip-dir` and `--zip-each-dir` enable ZIP output automatically. Selections refer
-to sorted destination directories, include descendants, and support the same
-optional password. Separate mode uses a new output directory and retains the
-sorted hierarchy: `documents/pdf` becomes `exports/documents/pdf.zip`. Each ZIP
-contains its own layout index; unselected files are omitted from the export.
-Use `--dry-run` to preview archive destinations. See the
-[selection reference](docs/commands.md#selecting-sorted-directories) for details.
+`--zip-dir` selects sorted directories and descendants; `--zip-each-dir` creates
+separate ZIPs. Both enable ZIP output automatically. Separate exports preserve
+hierarchy (`documents/pdf` → `exports/documents/pdf.zip`) in a new output directory.
+Each ZIP includes a layout index. Preview with `--dry-run`; see the
+[selection reference](docs/commands.md#selecting-sorted-directories).
 
-ZIP reports include per-archive sizes, aggregate output size, selected payload size, signed savings,
-and total elapsed time. Negative savings mean the ZIP grew. ZIP filenames remain
-visible when contents are encrypted; extraction requires an AES-compatible reader.
-Archive previews read and decompress entries and therefore need input passwords.
-Use `inspect` when only archive metadata is needed.
+<small><em>Reports show payload/output sizes, savings and elapsed time; negative
+savings mean growth. Encryption leaves filenames visible and requires an
+AES-compatible reader. Archive previews need input passwords; use
+<code>inspect</code> for metadata only.</em></small>
 
 ### Permissions and temporary storage
 
