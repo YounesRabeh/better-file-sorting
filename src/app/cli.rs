@@ -52,10 +52,30 @@ pub enum Command {
         #[command(subcommand)]
         command: ReportCommand,
     },
-    /// Explicitly refresh detection metadata in a standard repository
+    /// Extract nested ZIP samples from an existing standard repository
     Analyze {
+        /// Configuration enabling [archive] nested extraction and tree budgets
+        #[arg(short = 'c', long)]
+        config: Option<PathBuf>,
+        /// Continue with verified archive extraction receipts
+        #[arg(long)]
+        resume: bool,
+        /// Preview candidates and limits without extracting or writing
+        #[arg(long)]
+        dry_run: bool,
         #[arg(default_value = crate::app::config::DEFAULT_REPOSITORY)]
         repository: PathBuf,
+    },
+    /// Refresh detection metadata without extracting archives
+    Reclassify {
+        #[arg(default_value = crate::app::config::DEFAULT_REPOSITORY)]
+        repository: PathBuf,
+        /// Reuse detection checkpoints after verifying stored object hashes
+        #[arg(long)]
+        resume: bool,
+        /// Show unique-object count and target detector without writing
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Export an independent ZIP layout using existing objects and metadata
     Export(Export),
@@ -88,7 +108,7 @@ pub struct Ingest {
     /// ZIP only this sorted relative directory; repeat to select several
     #[arg(long = "zip-dir", value_name = "DIRECTORY")]
     pub zip_dirs: Vec<String>,
-    /// Create one ZIP per selected directory, or per top-level directory
+    /// Create one ZIP per selected directory or automatic output group
     #[arg(long)]
     pub zip_each_dir: bool,
     /// Protected file containing exactly one password for AES-256 ZIP output
@@ -247,7 +267,7 @@ pub struct Export {
     /// Destination ZIP, or collection directory with --zip-each-dir
     #[arg(short = 'o', long)]
     pub output: PathBuf,
-    /// Create one ZIP per nonempty top-level group
+    /// Create one ZIP per group; automatic fallback uses each full group directory
     #[arg(long)]
     pub zip_each_dir: bool,
     /// Select a sorted relative directory; repeat to select several

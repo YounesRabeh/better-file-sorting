@@ -45,7 +45,7 @@ import untrusted filename columns as text in spreadsheet software.
 
 Worker count, file sizes, compression, duplicate frequency and filesystem latency
 all affect throughput. More workers do not always improve performance. The
-detector reuses the 8 KiB prefix captured during hashing; only ZIP candidates
+detector reuses the 8 KiB prefix captured during hashing; ZIP and CFB candidates
 require additional bounded metadata reads. Repository-wide reports retain
 metadata in memory, so memory use grows with collection size.
 
@@ -126,3 +126,52 @@ fuzz run does not establish exhaustive parser correctness. These checks do not
 prove power-loss durability, arbitrary OOM recovery or immediate OS socket closure.
 Discovery parses HTML in memory, and repository/checkpoint metadata grows with
 collection size; unlimited budgets do not imply constant memory usage.
+
+## Nested extraction qualification
+
+The reproducible harness is `benches/nested.py`. Supply a v0.7.0 baseline binary
+and the candidate release binary:
+
+```sh
+python3 benches/nested.py /path/to/v0.7.0/bfsort ./target/release/bfsort
+```
+
+[Recorded results](benchmark-nested.jsonl) use seed 12345, one warm-up and five
+measured runs, one worker and a warm OS cache. Many-small uses 1,000 files of
+1 KiB; few-large uses four files of 8 MiB. Each run has a separate repository.
+The harness records wall time, peak RSS, and sampled staging-file size at 5 ms
+intervals. Sampled staging sizes are lower bounds, not guaranteed high-water marks.
+
+| Case | Baseline median | Candidate median | Candidate/baseline |
+| --- | ---: | ---: | ---: |
+| Many small, fresh | 0.1740 s | 0.1777 s | 1.021 |
+| Many small, resume | 0.3083 s | 0.3046 s | 0.988 |
+| Few large, fresh | 0.0867 s | 0.0880 s | 1.014 |
+| Few large, resume | 0.0521 s | 0.0522 s | 1.002 |
+
+All four ratios pass the planned 1.10 ceiling. These subsecond synthetic results
+are not throughput guarantees for a 129 GiB malware repository.
+
+The nested fixture contains ten identical ZIP occurrences with a nested leaf ZIP.
+Depth-1/depth-2 fresh runs decompressed two/three unique archives respectively.
+Completed resume decompressed zero; removing one receipt from a disposable fixture
+required exactly one fresh extraction. That receipt-removal case tests missing
+checkpoint recovery, not arbitrary power-loss durability. A separate password-retry
+regression verifies successful siblings are reused after an incomplete branch.
+
+Depth-2 fresh ingestion measured a 0.0646 s median; existing-repository expansion
+measured 0.0468 s for the same final content/occurrence counts. Depth-2 completed
+resume measured 0.0903 s: repeated integrity verification can cost more than fresh
+decompression on this small duplicate-heavy input. No universal resume speedup is
+claimed. Reclassification performed no archive extraction.
+
+Independent review found descriptor accumulation in sealed traversal, missing
+budget preflight, missing tree checkpoint identity, and a truncated CAB false
+positive. Each received a failing regression test followed by a passing fix.
+Qualification passed 159 tests, formatting, Clippy with warnings denied, and a
+release build. The example nested configuration validates.
+
+An attempted AddressSanitizer fuzz smoke did not run: the existing generated
+build cache was invalid, and a clean rebuild encountered compiler-cache permission
+and disk-quota failures. No new sanitizer coverage is claimed. Real-dataset scale,
+forced power-loss injection and non-Linux platforms were not qualified.

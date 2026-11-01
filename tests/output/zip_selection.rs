@@ -211,6 +211,13 @@ fn conflicting_archive_file_and_directory_paths_are_rejected() {
             occurrence_id: "b".repeat(64),
         })
         .collect();
-    assert!(bfs::output::archive::plan_exports(&entries, &config).is_err());
+    assert!(
+        bfs::output::archive::plan_exports(
+            &entries,
+            &config,
+            &bfs::organization::rules::Rules::default()
+        )
+        .is_err()
+    );
     assert!(!config.output.exists());
 }

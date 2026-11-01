@@ -56,7 +56,7 @@ fn embedded_presets_and_portable_exports_preserve_provenance() {
     let mut zip = zip::ZipArchive::new(std::fs::File::open(output).unwrap()).unwrap();
     let header: serde_json::Value =
         serde_json::from_reader(zip.by_name("export.json").unwrap()).unwrap();
-    assert_eq!(header["schema_version"], 1);
+    assert_eq!(header["schema_version"], 2);
     use std::io::Read;
     let mut text = String::new();
     zip.by_name("manifest.jsonl")
@@ -232,4 +232,119 @@ fn crash_recovery_rejects_corrupted_layout_metadata() {
     writer.finish().unwrap();
     let result = common::run(&args);
     assert!(!result.status.success(), "corrupted layout was accepted");
+}
+
+#[test]
+fn automatic_fallback_exports_each_dynamic_group_and_keeps_explicit_rules() {
+    let t = tempfile::tempdir().unwrap();
+    let input = t.path().join("mixed.zip");
+    common::archive(
+        &input,
+        &[
+            ("fake.foo", b"%PDF-1.7\n"),
+            ("a.NEWTYPE", b"\0\xff\x01"),
+            ("b.newtype", b"\0\xff\x01"),
+            ("unknown", b"\0\xfe"),
+            ("weak.xyz", b"ordinary prose"),
+            ("conflict.bin", b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR %PDF-1.7\n"),
+        ],
+    );
+    let root = t.path().join("repo");
+    let ingest = common::run(&[
+        "ingest".as_ref(),
+        input.as_os_str(),
+        "-o".as_ref(),
+        root.as_os_str(),
+        "--security-mode".as_ref(),
+        "standard".as_ref(),
+        "--preset".as_ref(),
+        "by-format-or-extension".as_ref(),
+    ]);
+    assert!(
+        ingest.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+    let output = t.path().join("automatic");
+    let args = [
+        "export".as_ref(),
+        root.as_os_str(),
+        "--preset".as_ref(),
+        "by-format-or-extension".as_ref(),
+        "--zip-each-dir".as_ref(),
+        "--output".as_ref(),
+        output.as_os_str(),
+        "--resume".as_ref(),
+    ];
+    let result = common::run(&args);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    for (group, count) in [
+        ("detected/pdf", 1),
+        ("undetected/extension-newtype", 2),
+        ("undetected/no-extension", 1),
+        ("undetected/extension-xyz", 1),
+        ("ambiguous", 1),
+    ] {
+        let mut zip =
+            zip::ZipArchive::new(std::fs::File::open(output.join(format!("{group}.zip"))).unwrap())
+                .unwrap();
+        let mut manifest = String::new();
+        use std::io::Read;
+        zip.by_name("manifest.jsonl")
+            .unwrap()
+            .read_to_string(&mut manifest)
+            .unwrap();
+        assert_eq!(manifest.lines().count(), count);
+    }
+    assert!(common::run(&args).status.success());
+    let rows = bfs::repository::metadata::load(&root).unwrap();
+    let explicit = Rules::parse("[organization]\nduplicates = 'all'\ndefault_directory = 'remainder'\n[[rules]]\nname = 'selected-extension'\n[rules.match]\noriginal_extension = 'newtype'\n[rules.output]\ndirectory = 'my-selection'\nfilename = '{sha256}.sample'\n").unwrap();
+    let plan = explicit.plan(&rows).unwrap();
+    assert_eq!(
+        plan.iter()
+            .filter(|p| p.path.starts_with("my-selection/"))
+            .count(),
+        2
+    );
+    assert_eq!(plan.len(), 6);
+    let both = t.path().join("both.toml");
+    std::fs::write(&both, "[organization]\nduplicates = 'all'\ndefault_directory = '{format_or_extension}'\n[[rules]]\nname = 'selected-extension'\n[rules.match]\noriginal_extension = 'newtype'\n[rules.output]\ndirectory = 'my-selection'\nfilename = '{sha256}.sample'\n").unwrap();
+    let custom = t.path().join("custom");
+    let out = common::run(&[
+        "export".as_ref(),
+        root.as_os_str(),
+        "--rules".as_ref(),
+        both.as_os_str(),
+        "--zip-each-dir".as_ref(),
+        "--output".as_ref(),
+        custom.as_os_str(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(custom.join("my-selection.zip").is_file());
+    assert!(custom.join("detected/pdf.zip").is_file());
+    assert!(custom.join("ambiguous.zip").is_file());
+    let direct = t.path().join("direct");
+    let out = common::run(&[
+        "ingest".as_ref(),
+        input.as_os_str(),
+        "--preset".as_ref(),
+        "by-format-or-extension".as_ref(),
+        "--zip-each-dir".as_ref(),
+        "--output".as_ref(),
+        direct.as_os_str(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(direct.join("detected/pdf.zip").is_file());
 }

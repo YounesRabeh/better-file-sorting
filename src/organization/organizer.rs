@@ -56,6 +56,10 @@ pub fn organize(repo: &Repository, rules: &Rules, plan: &[Planned]) -> Result<St
             .context("hard link failed; use view_mode = 'manifest' for this filesystem")?;
         security::validate_file(&destination, repo.mode())?;
     }
+    let mut policy = tempfile::NamedTempFile::new_in(staging.path())?;
+    serde_json::to_writer(&mut policy, rules)?;
+    policy.as_file().sync_all()?;
+    policy.persist_noclobber(staging.path().join("rules.json"))?;
     let mut index = tempfile::NamedTempFile::new_in(staging.path())?;
     for entry in plan {
         serde_json::to_writer(&mut index, entry)?;

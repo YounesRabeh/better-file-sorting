@@ -81,6 +81,17 @@ impl Default for Limits {
         }
     }
 }
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ArchiveConfig {
+    pub nested_extraction: bool,
+    pub max_depth: usize,
+    #[serde(deserialize_with = "crate::collection::acquisition::deserialize_optional_bytes")]
+    pub max_total_expanded_bytes: Option<u64>,
+    #[serde(deserialize_with = "crate::collection::acquisition::deserialize_optional_count")]
+    pub max_total_entries: Option<usize>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -107,6 +118,7 @@ pub struct Config {
     pub resume: bool,
     pub security: Security,
     pub limits: Limits,
+    pub archive: ArchiveConfig,
 }
 impl Default for Config {
     /// Return configuration defaults with bounded worker parallelism.
@@ -131,6 +143,7 @@ impl Default for Config {
             resume: false,
             security: Security::default(),
             limits: Limits::default(),
+            archive: ArchiveConfig::default(),
         }
     }
 }
@@ -291,6 +304,17 @@ impl Config {
         }
         if self.rules.is_some() && self.preset.is_some() {
             return Err(error("rules and preset are mutually exclusive").into());
+        }
+        if self.archive.nested_extraction != (self.archive.max_depth > 0) {
+            return Err(error("nested_extraction requires positive max_depth; disabled extraction requires zero depth").into());
+        }
+        if self.archive.nested_extraction && self.input_mode != InputMode::Archives {
+            return Err(error("nested_extraction requires input_mode = archives").into());
+        }
+        if self.archive.max_total_expanded_bytes == Some(0)
+            || self.archive.max_total_entries == Some(0)
+        {
+            return Err(error("tree budgets must be positive or unlimited").into());
         }
         if self.output.as_os_str().is_empty() {
             return Err(error("output must not be empty").into());

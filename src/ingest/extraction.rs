@@ -21,6 +21,7 @@ pub struct Extracted {
     pub sha256: String,
     pub size: u64,
     pub prefix: Vec<u8>,
+    pub hashing_seconds: f64,
 }
 
 /// Copy and hash one ordinary file into private staging with bounded reads.
@@ -54,6 +55,7 @@ pub fn extract_file(
     let mut hash = Sha256::new();
     let mut prefix = Vec::with_capacity(8192);
     let mut size = 0u64;
+    let mut hashing_seconds = 0.0;
     let mut buffer = [0u8; 65536];
     loop {
         ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
@@ -68,7 +70,9 @@ pub fn extract_file(
             limit.is_none_or(|limit| size <= limit),
             "file size limit exceeded"
         );
+        let hash_started = std::time::Instant::now();
         hash.update(&buffer[..count]);
+        hashing_seconds += hash_started.elapsed().as_secs_f64();
         prefix.extend_from_slice(&buffer[..count.min(8192 - prefix.len())]);
         file.write_all(&buffer[..count])?;
     }
@@ -78,6 +82,7 @@ pub fn extract_file(
         sha256: hash.finalize().iter().map(|b| format!("{b:02x}")).collect(),
         size,
         prefix,
+        hashing_seconds,
     })
 }
 /// Validate an archive entry name before using it as metadata.
@@ -105,6 +110,22 @@ pub fn extract(
     limits: &Limits,
     total: &mut u64,
     cancelled: &AtomicBool,
+) -> Result<Extracted> {
+    extract_budgeted(
+        archive, index, passwords, staging, limits, total, cancelled, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn extract_budgeted(
+    archive: &mut zip::ZipArchive<File>,
+    index: usize,
+    passwords: &[String],
+    staging: &Path,
+    limits: &Limits,
+    total: &mut u64,
+    cancelled: &AtomicBool,
+    mut tree: Option<&mut crate::ingest::nested::Budget>,
 ) -> Result<Extracted> {
     let entry = archive.by_index_data(index)?;
     validate_name(&entry.name()?)?;
@@ -165,6 +186,7 @@ pub fn extract(
         let mut hash = Sha256::new();
         let mut prefix = Vec::with_capacity(8192);
         let mut size = 0u64;
+        let mut hashing_seconds = 0.0;
         let mut buffer = [0u8; 65536];
         let mut invalid = false;
         loop {
@@ -191,7 +213,12 @@ pub fn extract(
                     && limits.max_archive_bytes.is_none_or(|limit| *total <= limit),
                 "actual decompression limit exceeded"
             );
+            if let Some(tree) = tree.as_deref_mut() {
+                tree.bytes(count as u64)?;
+            }
+            let hash_started = std::time::Instant::now();
             hash.update(&buffer[..count]);
+            hashing_seconds += hash_started.elapsed().as_secs_f64();
             let prefix_count = count.min(8192 - prefix.len());
             prefix.extend_from_slice(&buffer[..prefix_count]);
             file.write_all(&buffer[..count])?;
@@ -205,6 +232,7 @@ pub fn extract(
             sha256: hash.finalize().iter().map(|b| format!("{b:02x}")).collect(),
             size,
             prefix,
+            hashing_seconds,
         });
     }
     bail!("entry decryption or integrity verification failed")

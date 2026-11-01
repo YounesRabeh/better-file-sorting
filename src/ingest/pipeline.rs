@@ -69,6 +69,8 @@ pub struct RunReport {
     pub first_failure: Option<Failure>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub zip: Option<ZipSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nested: Option<crate::ingest::nested::TreeReport>,
 }
 struct Journal {
     manifest: File,
@@ -135,7 +137,7 @@ fn ingest_zip(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> Result<
     let repo = Repository::existing(&staging.output)?;
     let records = metadata::load(repo.root())?;
     let plan = rules.plan(&records)?;
-    let exports = archive::plan_exports(&plan, config)?;
+    let exports = archive::plan_exports(&plan, config, rules)?;
     let sizes: BTreeMap<_, _> = records.iter().map(|r| (&r.occurrence_id, r.size)).collect();
     let payload_bytes =
         exports
@@ -305,7 +307,7 @@ pub fn preview(config: &Config, cancelled: &AtomicBool) -> Result<Preview> {
     let records: Vec<_> = merged.into_values().collect();
     let mut plan = rules.plan(&records)?;
     let archives = if config.zip_enabled() {
-        archive::plan_exports(&plan, config)?
+        archive::plan_exports(&plan, config, &rules)?
     } else {
         vec![]
     };
@@ -408,6 +410,11 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
     let progress =
         crate::app::presentation::Progress::new(Some(paths.len() as u64), "Organizing inputs");
     let started = Instant::now();
+    let nested_cache = crate::ingest::nested::Cache::with_records(existing.values());
+    let nested_report = Mutex::new(crate::ingest::nested::TreeReport {
+        schema_version: 1,
+        ..Default::default()
+    });
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(config.workers)
         .build()?;
@@ -417,6 +424,49 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                 return Ok(());
             }
             let work = || -> Result<()> {
+                if config.archive.nested_extraction {
+                    let mut nested_manifest = create_journal_file(
+                        repo.root(),
+                        "manifests",
+                        &format!(
+                            "{run_id}-{}",
+                            metadata::digest(path.as_os_str().as_encoded_bytes())
+                        ),
+                    )?;
+                    let result = crate::ingest::nested::ingest_root(
+                        &repo,
+                        path,
+                        config,
+                        cancelled,
+                        &nested_cache,
+                        &mut nested_manifest,
+                        &run_id,
+                    )?;
+                    let mut journal = journal
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("journal lock poisoned"))?;
+                    journal.accepted += result.accepted;
+                    journal.reused_occurrences += result.reused_occurrences;
+                    journal.failures += result.failures;
+                    journal.bytes += result.metrics.decompressed_bytes;
+                    if result.failures > 0 {
+                        journal.first_failure = Some(Failure {
+                            source_path: path.to_string_lossy().into_owned(),
+                            entry_index: None,
+                            error: result
+                                .outcomes
+                                .iter()
+                                .filter_map(|o| o.diagnostic.as_deref())
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        });
+                    }
+                    nested_report
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("nested report lock poisoned"))?
+                        .merge(result);
+                    return Ok(());
+                }
                 let fingerprint = metadata::digest(&serde_json::to_vec(&(
                     &fingerprint,
                     config.remote_inputs.get(path),
@@ -526,6 +576,7 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                                 &item.sha256,
                             ))?);
                             let record = Occurrence {
+                                nested: None,
                                 detection,
                                 mismatch,
                                 provenance: config.remote_inputs.get(path).cloned(),
@@ -645,6 +696,10 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
         summary: report::summary(&repo, &records)?,
         first_failure: journal.first_failure,
         zip: None,
+        nested: config
+            .archive
+            .nested_extraction
+            .then(|| nested_report.into_inner().expect("nested report lock")),
     };
     let mut file = tempfile::NamedTempFile::new_in(repo.root().join("reports"))?;
     serde_json::to_writer_pretty(&mut file, &report)?;

@@ -33,9 +33,11 @@
 original extensions or filename/content agreement. It keeps source provenance,
 deduplicates repository objects and exports independent portable ZIP collections.
 
-- Embedded `by-format`, `by-extension` and `by-mismatch` presets.
+- Embedded `by-format`, `by-format-or-extension`, `by-extension` and `by-mismatch` presets.
 - Precise content detection with explicit unknown/ambiguous results.
 - Repository reports without opening sealed payloads.
+- Nested ZIP extraction with parent provenance and reusable extraction receipts.
+- Existing-repository analysis and resumable reclassification.
 - Archive-level ingestion resume and per-ZIP export recovery.
 - Readable terminal summaries and clean JSON/JSONL/CSV output.
 - Optional resource budgets and deadlines, protected storage and cancellation.
@@ -64,6 +66,10 @@ Omitted application budgets and deadlines are **unlimited**. For explicit caps,
 use `-c ./examples/bounded.toml` with ingestion or acquisition. Path, integrity,
 permission and technical parser checks remain mandatory. Unlimited operation can
 exhaust disk or memory and wait on a stalled server; Ctrl+C remains available.
+
+For nested ZIPs, use [examples/nested.toml](examples/nested.toml). Existing
+repositories can be expanded without the original downloads; see the
+[nested extraction guide](docs/nested.md).
 
 ## Usage
 

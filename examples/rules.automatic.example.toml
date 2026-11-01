@@ -1,0 +1,17 @@
+# Automatic grouping plus an optional explicit override.
+# bfsort export ./repository --rules examples/rules.automatic.example.toml --zip-each-dir -o ./exports
+version = 1
+
+[organization]
+duplicates = "all"
+default_directory = "{format_or_extension}"
+default_filename = "{sha256}.sample"
+
+# Remove this block for automatic grouping alone; add rules for other selections.
+[[rules]]
+name = "selected-pdfs"
+[rules.match]
+detected_format = "pdf"
+[rules.output]
+directory = "selected-pdfs"
+filename = "{sha256}.sample"

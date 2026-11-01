@@ -19,6 +19,8 @@ use std::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Occurrence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested: Option<NestedProvenance>,
     #[serde(default)]
     pub detection: crate::detection::classifier::Detection,
     #[serde(default)]
@@ -45,6 +47,17 @@ pub struct Occurrence {
     pub ingest_date: String,
     pub run_id: String,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NestedProvenance {
+    pub schema_version: u32,
+    pub parent_sha256: String,
+    pub parent_occurrence_id: Option<String>,
+    pub root_source: String,
+    pub root_input_hash: String,
+    pub archive_depth: usize,
+    pub entry_chain: Vec<usize>,
+}
 /// Hash bytes as lowercase hexadecimal SHA-256.
 pub fn digest(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
@@ -66,6 +79,19 @@ impl Occurrence {
             .contains(&self.file_type.as_str()),
             "invalid manifest file type"
         );
+        if let Some(n) = &self.nested {
+            ensure!(
+                n.schema_version == 1
+                    && valid_hash(&n.parent_sha256)
+                    && valid_hash(&n.root_input_hash)
+                    && n.parent_occurrence_id
+                        .as_ref()
+                        .is_none_or(|id| valid_hash(id))
+                    && !n.entry_chain.is_empty()
+                    && n.archive_depth.checked_add(1) == Some(n.entry_chain.len()),
+                "invalid nested provenance"
+            );
+        }
         Ok(())
     }
 }
@@ -162,6 +188,14 @@ pub fn analyze(
     repo: &crate::repository::storage::Repository,
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> Result<usize> {
+    reclassify(repo, cancelled, false)
+}
+
+pub fn reclassify(
+    repo: &crate::repository::storage::Repository,
+    cancelled: &std::sync::atomic::AtomicBool,
+    resume: bool,
+) -> Result<usize> {
     use std::io::Read;
     use std::sync::atomic::Ordering;
     ensure!(
@@ -170,6 +204,8 @@ pub fn analyze(
     );
     let mut records = load(repo.root())?;
     let mut cache = BTreeMap::new();
+    let checkpoint_dir = repo.root().join("reports/reclassification");
+    security::private_dir(&checkpoint_dir)?;
     for record in &mut records {
         ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
         if !cache.contains_key(&record.sha256) {
@@ -180,13 +216,44 @@ pub fn analyze(
                 file.metadata()?.len() == record.size,
                 "manifest/object size mismatch"
             );
-            let mut prefix = Vec::with_capacity(crate::detection::classifier::PREFIX_LIMIT);
-            Read::take(&mut file, crate::detection::classifier::PREFIX_LIMIT as u64)
-                .read_to_end(&mut prefix)?;
-            cache.insert(
-                record.sha256.clone(),
-                crate::detection::classifier::detect_reader(&prefix, &mut file),
+            let checkpoint = checkpoint_dir.join(format!(
+                "{}-{}.json",
+                record.sha256,
+                crate::detection::classifier::DETECTOR_VERSION
+            ));
+            crate::ingest::discovery::check_path(&checkpoint)?;
+            let hash = crate::ingest::nested::hash_file(&mut file, cancelled)?;
+            ensure!(
+                hash == record.sha256,
+                "reclassification object checksum mismatch"
             );
+            if resume && checkpoint.try_exists()? {
+                security::validate_file(&checkpoint, SecurityMode::Standard)?;
+                ensure!(
+                    fs::metadata(&checkpoint)?.len() <= 65536,
+                    "oversized classification checkpoint"
+                );
+                let detection: crate::detection::classifier::Detection =
+                    serde_json::from_reader(fs::File::open(&checkpoint)?)?;
+                ensure!(
+                    detection.detector_version == crate::detection::classifier::DETECTOR_VERSION,
+                    "stale classification checkpoint"
+                );
+                cache.insert(record.sha256.clone(), detection);
+            } else {
+                let mut prefix = Vec::with_capacity(crate::detection::classifier::PREFIX_LIMIT);
+                Read::take(&mut file, crate::detection::classifier::PREFIX_LIMIT as u64)
+                    .read_to_end(&mut prefix)?;
+                cache.insert(
+                    record.sha256.clone(),
+                    crate::detection::classifier::detect_reader(&prefix, &mut file),
+                );
+            }
+            let mut saved = tempfile::NamedTempFile::new_in(&checkpoint_dir)?;
+            serde_json::to_writer(&mut saved, &cache[&record.sha256])?;
+            saved.as_file().sync_all()?;
+            saved.persist(&checkpoint)?;
+            fs::File::open(&checkpoint_dir)?.sync_all()?;
         }
         record.detection = cache[&record.sha256].clone();
         record.mismatch =
@@ -207,5 +274,41 @@ pub fn analyze(
     ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
     file.persist(target)?;
     fs::File::open(directory)?.sync_all()?;
+    let current = repo.root().join("views/CURRENT");
+    crate::ingest::discovery::check_path(&current)?;
+    let rules = if current.try_exists()? {
+        security::validate_file(&current, SecurityMode::Standard)?;
+        ensure!(
+            fs::metadata(&current)?.len() <= 4096,
+            "invalid current view pointer"
+        );
+        let generation = fs::read_to_string(&current)?;
+        let generation = generation.trim();
+        ensure!(
+            generation.starts_with("view-")
+                && !generation.contains(['/', '\\'])
+                && !generation.contains(".."),
+            "invalid current view pointer"
+        );
+        let policy = repo
+            .root()
+            .join("views")
+            .join(generation)
+            .join("rules.json");
+        crate::ingest::discovery::check_path(&policy)?;
+        if policy.try_exists()? {
+            security::validate_file(&policy, SecurityMode::Standard)?;
+            ensure!(
+                fs::metadata(&policy)?.len() <= 1024 * 1024,
+                "view rules too large"
+            );
+            serde_json::from_reader(fs::File::open(policy)?)?
+        } else {
+            crate::organization::rules::Rules::load_or_preset(None, None)?
+        }
+    } else {
+        crate::organization::rules::Rules::load_or_preset(None, None)?
+    };
+    crate::organization::organizer::organize(repo, &rules, &rules.plan(&records)?)?;
     Ok(records.len())
 }

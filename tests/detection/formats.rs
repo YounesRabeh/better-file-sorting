@@ -164,11 +164,9 @@ fn ingestion_reports_stats_rules_and_independent_exports() {
     );
     let records = common::manifest(&repo);
     assert_eq!(records.len(), 5);
-    assert!(
-        records
-            .iter()
-            .all(|r| r["detection"]["detector_version"] == "bfs-1")
-    );
+    assert!(records.iter().all(
+        |r| r["detection"]["detector_version"] == bfs::detection::classifier::DETECTOR_VERSION
+    ));
     let report = common::run(&[
         "report".as_ref(),
         "mismatches".as_ref(),
@@ -264,7 +262,7 @@ fn legacy_defaults_and_explicit_analysis() {
         records[0].mismatch.status,
         bfs::detection::mismatch::Status::NotEvaluated
     );
-    let result = common::run(&["analyze".as_ref(), repo.as_os_str()]);
+    let result = common::run(&["reclassify".as_ref(), repo.as_os_str()]);
     assert!(
         result.status.success(),
         "{}",
@@ -509,7 +507,7 @@ fn encrypted_ingestion_sealed_reports_and_export_refusal() {
         .success()
     );
     assert!(
-        !common::run(&["analyze".as_ref(), repo.as_os_str()])
+        !common::run(&["reclassify".as_ref(), repo.as_os_str()])
             .status
             .success()
     );
@@ -676,5 +674,150 @@ fn container_and_image_pdf_conflicts_are_ambiguous() {
     assert_eq!(
         classifier::detect(png).detected_format,
         classifier::Format::Ambiguous
+    );
+}
+
+#[test]
+fn expanded_formats_require_structural_headers_and_decode_utf16() {
+    use bfs::detection::classifier::detect;
+    let mut dex = vec![0u8; 112];
+    dex[..8].copy_from_slice(b"dex\n035\0");
+    dex[32..36].copy_from_slice(&112u32.to_le_bytes());
+    dex[36..40].copy_from_slice(&112u32.to_le_bytes());
+    dex[40..44].copy_from_slice(&0x12345678u32.to_le_bytes());
+    assert_eq!(detect(&dex).detected_format.as_str(), "dex");
+    assert_ne!(detect(&dex[..40]).detected_format.as_str(), "dex");
+    let java = [
+        0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 52, 0, 3, 1, 0, 1, b'A', 7, 0, 1, 0, 0x21, 0, 2, 0, 0,
+    ];
+    assert_eq!(detect(&java).detected_format.as_str(), "java_class");
+    assert_ne!(detect(&java[..10]).detected_format.as_str(), "java_class");
+    let mut lnk = vec![0; 76];
+    lnk[0] = 76;
+    lnk[4..20].copy_from_slice(&[1, 0x14, 2, 0, 0, 0, 0, 0, 0xc0, 0, 0, 0, 0, 0, 0, 0x46]);
+    lnk[60..64].copy_from_slice(&1u32.to_le_bytes());
+    assert_eq!(detect(&lnk).detected_format.as_str(), "lnk");
+    let ar = b"!<arch>\na/              0           0     0     100644  0         `\n";
+    assert_eq!(detect(ar).detected_format.as_str(), "ar");
+    let script: Vec<u8> = [0xff, 0xfe]
+        .into_iter()
+        .chain(
+            "@echo off\r\necho hello\r\n"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes),
+        )
+        .collect();
+    assert_eq!(detect(&script).detected_format.as_str(), "batch");
+    assert_ne!(detect(b"MSCF").detected_format.as_str(), "cab");
+    assert_ne!(detect(b"\x28\xb5\x2f\xfd").detected_format.as_str(), "zstd");
+    assert_ne!(detect(b"\x04\x22\x4d\x18").detected_format.as_str(), "lz4");
+}
+
+#[test]
+fn cfb_subtypes_are_bounded_and_loops_remain_generic() {
+    use bfs::detection::classifier::detect_reader;
+    let mut b = vec![0u8; 1536];
+    b[..8].copy_from_slice(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1");
+    b[26..28].copy_from_slice(&3u16.to_le_bytes());
+    b[28..30].copy_from_slice(&0xfffeu16.to_le_bytes());
+    b[30..32].copy_from_slice(&9u16.to_le_bytes());
+    b[32..34].copy_from_slice(&6u16.to_le_bytes());
+    b[44..48].copy_from_slice(&1u32.to_le_bytes());
+    b[48..52].copy_from_slice(&1u32.to_le_bytes());
+    b[512..516].copy_from_slice(&0xfffffffdu32.to_le_bytes());
+    b[516..520].copy_from_slice(&0xfffffffeu32.to_le_bytes());
+    for (index, name) in ["Root Entry", "WordDocument", "1Table"].iter().enumerate() {
+        let p = 1024 + 128 * index;
+        for (i, w) in name.encode_utf16().chain([0]).enumerate() {
+            b[p + 2 * i..p + 2 * i + 2].copy_from_slice(&w.to_le_bytes());
+        }
+        b[p + 64..p + 66].copy_from_slice(&((name.len() as u16 + 1) * 2).to_le_bytes());
+        b[p + 66] = if index == 0 { 5 } else { 2 };
+    }
+    assert_eq!(
+        detect_reader(&b[..512], &mut std::io::Cursor::new(&b))
+            .detected_format
+            .as_str(),
+        "doc"
+    );
+    b[516..520].copy_from_slice(&1u32.to_le_bytes());
+    assert_eq!(
+        detect_reader(&b[..512], &mut std::io::Cursor::new(&b))
+            .detected_format
+            .as_str(),
+        "cfb"
+    );
+}
+
+#[test]
+fn expanded_archive_headers_and_universal_macho_check_file_bounds() {
+    use bfs::detection::classifier::{detect, detect_reader};
+    let mut fat = vec![0; 28];
+    fat[..4].copy_from_slice(b"\xca\xfe\xba\xbe");
+    fat[4..8].copy_from_slice(&1u32.to_be_bytes());
+    fat[8..12].copy_from_slice(&7u32.to_be_bytes());
+    fat[16..20].copy_from_slice(&32u32.to_be_bytes());
+    fat[20..24].copy_from_slice(&32u32.to_be_bytes());
+    assert_ne!(
+        detect_reader(&fat, &mut std::io::Cursor::new(&fat))
+            .detected_format
+            .as_str(),
+        "macho"
+    );
+    fat.resize(64, 0);
+    assert_eq!(
+        detect_reader(&fat, &mut std::io::Cursor::new(&fat))
+            .detected_format
+            .as_str(),
+        "macho"
+    );
+    assert_eq!(
+        detect(b"\x28\xb5\x2f\xfd\x20\0\x01\0\0")
+            .detected_format
+            .as_str(),
+        "zstd"
+    );
+    assert_eq!(
+        detect(b"\x04\x22\x4d\x18\x60\x40\x82\0\0\0\0")
+            .detected_format
+            .as_str(),
+        "lz4"
+    );
+    assert_ne!(
+        detect(b"\x04\x22\x4d\x18\x60\x40\x83\0\0\0\0")
+            .detected_format
+            .as_str(),
+        "lz4"
+    );
+    let mut cab = vec![0; 44];
+    cab[..4].copy_from_slice(b"MSCF");
+    cab[8..12].copy_from_slice(&44u32.to_le_bytes());
+    cab[16..20].copy_from_slice(&44u32.to_le_bytes());
+    cab[24] = 3;
+    cab[25] = 1;
+    cab[26] = 1;
+    assert_eq!(
+        detect_reader(&cab, &mut std::io::Cursor::new(&cab))
+            .detected_format
+            .as_str(),
+        "cab"
+    );
+    assert_eq!(detect(b"FWS\x09\x08\0\0\0").detected_format.as_str(), "swf");
+}
+
+#[test]
+fn cab_rejects_missing_folder_table() {
+    let mut cab = vec![0; 36];
+    cab[..4].copy_from_slice(b"MSCF");
+    cab[8..12].copy_from_slice(&36u32.to_le_bytes());
+    cab[16..20].copy_from_slice(&36u32.to_le_bytes());
+    cab[24] = 3;
+    cab[25] = 1;
+    cab[26] = 1;
+    assert_ne!(
+        bfs::detection::classifier::detect(&cab)
+            .detected_format
+            .as_str(),
+        "cab"
     );
 }

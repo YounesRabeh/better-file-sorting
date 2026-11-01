@@ -64,7 +64,7 @@ identifiers!(Format {
     Html => "html", Xml => "xml", Json => "json", Text => "text", Zip => "zip",
     Rar => "rar", SevenZip => "7z", Tar => "tar", Gzip => "gzip", Bzip2 => "bzip2", Xz => "xz",
     Jar => "jar", Apk => "apk", Png => "png", Jpeg => "jpeg", Gif => "gif", Webp => "webp",
-    Bmp => "bmp", Tiff => "tiff", Sqlite => "sqlite", Wasm => "wasm"
+    Bmp => "bmp", Tiff => "tiff", Sqlite => "sqlite", Wasm => "wasm", Dex => "dex", JavaClass => "java_class", Cab => "cab", Zstd => "zstd", Lz4 => "lz4", Ar => "ar", Swf => "swf", Lnk => "lnk", Doc => "doc", Xls => "xls", Ppt => "ppt", Msi => "msi"
 });
 identifiers!(Family {
     NotEvaluated => "not_evaluated", Unknown => "unknown", Ambiguous => "ambiguous",
@@ -102,7 +102,7 @@ impl Confidence {
         }
     }
 }
-pub const DETECTOR_VERSION: &str = "bfs-1";
+pub const DETECTOR_VERSION: &str = "bfs-2";
 pub const PREFIX_LIMIT: usize = 8192;
 const ZIP_DIRECTORY_LIMIT: usize = 1024 * 1024;
 const ZIP_ENTRY_LIMIT: usize = 4096;
@@ -132,9 +132,21 @@ impl Default for Detection {
     }
 }
 impl Detection {
-    fn new(format: Format, confidence: Confidence, evidence: &str) -> Self {
+    pub(super) fn new(format: Format, confidence: Confidence, evidence: &str) -> Self {
         use Format::*;
         let (family, mime) = match format {
+            Dex => (Family::Executable, "application/vnd.android.dex"),
+            JavaClass => (Family::Executable, "application/java-vm"),
+            Cab => (Family::Archive, "application/vnd.ms-cab-compressed"),
+            Zstd => (Family::Archive, "application/zstd"),
+            Lz4 => (Family::Archive, "application/x-lz4"),
+            Ar => (Family::Archive, "application/x-archive"),
+            Swf => (Family::Document, "application/x-shockwave-flash"),
+            Lnk => (Family::Document, "application/x-ms-shortcut"),
+            Doc => (Family::Document, "application/msword"),
+            Xls => (Family::Document, "application/vnd.ms-excel"),
+            Ppt => (Family::Document, "application/vnd.ms-powerpoint"),
+            Msi => (Family::Package, "application/x-msi"),
             Pe => (
                 Family::Executable,
                 "application/vnd.microsoft.portable-executable",
@@ -301,9 +313,13 @@ fn pdf_header(b: &[u8]) -> bool {
 
 /// Identify content using at most the existing 8 KiB prefix. Filenames are never evidence.
 pub fn detect(bytes: &[u8]) -> Detection {
+    detect_bounded(bytes, None)
+}
+
+fn detect_bounded(bytes: &[u8], length: Option<u64>) -> Detection {
     use Format::*;
     let b = &bytes[..bytes.len().min(PREFIX_LIMIT)];
-    let mut candidates = Vec::new();
+    let mut candidates = super::headers::candidates(b, length);
     if pe_header(b) {
         candidates.push(Pe);
     }
@@ -389,6 +405,29 @@ pub fn detect(bytes: &[u8]) -> Detection {
                 .unwrap_or_else(|| Detection::new(Zip, Confidence::Medium, "zip_prefix_only"));
         }
         return Detection::new(*format, Confidence::High, "signature_and_bounded_header");
+    }
+    if b.starts_with(&[0xff, 0xfe]) || b.starts_with(&[0xfe, 0xff]) {
+        let little = b[0] == 0xff;
+        let raw = &b[2..];
+        if raw.len().is_multiple_of(2) {
+            let words = raw.as_chunks::<2>().0.iter().map(|p| {
+                if little {
+                    u16::from_le_bytes([p[0], p[1]])
+                } else {
+                    u16::from_be_bytes([p[0], p[1]])
+                }
+            });
+            if let Ok(text) = String::from_utf16(&words.collect::<Vec<_>>()) {
+                let mut detection = detect(text.as_bytes());
+                if matches!(
+                    detection.detected_family,
+                    Family::Text | Family::Script | Family::Document
+                ) {
+                    detection.evidence.push("utf16_bom".into());
+                    return detection;
+                }
+            }
+        }
     }
     if let Ok(text) = std::str::from_utf8(b)
         && !text.is_empty()
@@ -532,9 +571,12 @@ fn zip_detection<R: Read + Seek>(reader: &mut R) -> Option<Detection> {
     Some(d)
 }
 pub fn detect_reader<R: Read + Seek>(prefix: &[u8], reader: &mut R) -> Detection {
-    let detection = detect(prefix);
+    let length = reader.seek(SeekFrom::End(0)).ok();
+    let detection = detect_bounded(prefix, length);
     if detection.detected_format == Format::Zip {
         zip_detection(reader).unwrap_or(detection)
+    } else if detection.detected_format == Format::Cfb {
+        super::compound::detect(reader).unwrap_or(detection)
     } else {
         detection
     }

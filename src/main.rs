@@ -141,6 +141,16 @@ fn run(cli: Cli) -> Result<u8> {
                 )?;
                 return Ok(0);
             }
+            if config.archive.nested_extraction
+                && (config.archive.max_total_entries.is_none()
+                    || config.archive.max_total_expanded_bytes.is_none())
+                && !ui.quiet
+                && !ui.json
+            {
+                eprintln!(
+                    "Warning: recursive extraction has unlimited tree budgets; configure [archive] limits."
+                );
+            }
             let report = bfs::ingest::pipeline::ingest(&config, &cancelled)?;
             output(
                 ui,
@@ -270,13 +280,82 @@ fn run(cli: Cli) -> Result<u8> {
             }
             Ok(0)
         }
-        Command::Analyze { repository } => {
+        Command::Analyze {
+            repository,
+            config,
+            resume,
+            dry_run,
+        } => {
             let repo = bfs::repository::storage::Repository::existing(&repository)?;
-            let count = bfs::repository::metadata::analyze(&repo, cancellation()?.as_ref())?;
+            let mut config = load(config.as_deref(), ui)?;
+            config.resume = resume;
+            config.input_mode = bfs::app::config::InputMode::Archives;
+            config.validate()?;
+            if dry_run {
+                let preview = bfs::ingest::nested::preview(&repo, &config)?;
+                output(
+                    ui,
+                    &preview,
+                    &format!(
+                        "Preview: {} archive occurrences; {} unique; {} reusable; {} need extraction; expanded size unknown",
+                        preview.candidate_occurrences,
+                        preview.unique_archives,
+                        preview.reusable_archives,
+                        preview.needs_extraction
+                    ),
+                )?;
+                return Ok(0);
+            }
+            if (config.archive.max_total_entries.is_none()
+                || config.archive.max_total_expanded_bytes.is_none())
+                && !ui.quiet
+                && !ui.json
+            {
+                eprintln!(
+                    "Warning: recursive extraction has unlimited tree budgets; configure [archive] limits."
+                );
+            }
+            let report = bfs::ingest::nested::analyze(&repo, &config, cancellation()?.as_ref())?;
+            output(
+                ui,
+                &report,
+                &format!(
+                    "Analyzed: {} child occurrences; {} failed; {} archives extracted; {} reused",
+                    report.accepted,
+                    report.failures,
+                    report.metrics.extracted_archives,
+                    report.metrics.reused_archives
+                ),
+            )?;
+            Ok(if report.failures > 0 { 1 } else { 0 })
+        }
+        Command::Reclassify {
+            repository,
+            resume,
+            dry_run,
+        } => {
+            let repo = bfs::repository::storage::Repository::existing(&repository)?;
+            if dry_run {
+                let rows = bfs::repository::metadata::load(repo.root())?;
+                let hashes: std::collections::BTreeSet<_> =
+                    rows.iter().map(|r| &r.sha256).collect();
+                output(
+                    ui,
+                    &serde_json::json!({"unique_objects": hashes.len(), "detector_version": bfs::detection::classifier::DETECTOR_VERSION}),
+                    &format!(
+                        "Preview: {} unique objects; detector {}",
+                        hashes.len(),
+                        bfs::detection::classifier::DETECTOR_VERSION
+                    ),
+                )?;
+                return Ok(0);
+            }
+            let count =
+                bfs::repository::metadata::reclassify(&repo, cancellation()?.as_ref(), resume)?;
             output(
                 ui,
                 &serde_json::json!({"analyzed_occurrences": count}),
-                &format!("Analyzed: {count} occurrences"),
+                &format!("Reclassified: {count} occurrences"),
             )?;
             Ok(0)
         }

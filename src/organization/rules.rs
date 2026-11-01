@@ -21,6 +21,7 @@ use unicode_normalization::UnicodeNormalization;
 pub enum Preset {
     #[default]
     ByFormat,
+    ByFormatOrExtension,
     ByExtension,
     ByMismatch,
 }
@@ -36,6 +37,7 @@ fn deserialize_rule_bytes<'de, D: serde::Deserializer<'de>>(
 const FIELDS: &[&str] = &[
     "file_type",
     "detected_format",
+    "format_or_extension",
     "detected_family",
     "mismatch_status",
     "original_name",
@@ -55,7 +57,7 @@ pub struct Planned {
     pub sha256: String,
     pub occurrence_id: String,
 }
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Duplicates {
     #[default]
@@ -64,21 +66,21 @@ pub enum Duplicates {
     OnlyDuplicates,
     Separate,
 }
-#[derive(Debug, Default, PartialEq, Deserialize)]
+#[derive(Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ViewMode {
     #[default]
     Hardlink,
     Manifest,
 }
-#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FilenamePolicy {
     #[default]
     Samples,
     Regular,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Organization {
     pub filename_policy: FilenamePolicy,
@@ -99,7 +101,7 @@ impl Default for Organization {
         }
     }
 }
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Matcher {
     pub detected_format: Option<crate::detection::classifier::Format>,
@@ -134,13 +136,13 @@ impl Matcher {
             && self.max_size.is_none_or(|v| row.size <= v)
     }
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Output {
     pub directory: String,
     pub filename: String,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
     pub name: String,
@@ -148,7 +150,7 @@ pub struct Rule {
     pub matcher: Matcher,
     pub output: Output,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Rules {
     pub version: u32,
@@ -184,7 +186,7 @@ fn template(text: &str, filename: bool, policy: FilenamePolicy) -> Result<()> {
         "unsafe template component"
     );
     ensure!(
-        text.split('/').count() <= 8,
+        text.split('/').count() + text.matches("{format_or_extension}").count() <= 8,
         "directory template exceeds 8 components"
     );
     if filename {
@@ -204,6 +206,10 @@ fn template(text: &str, filename: bool, policy: FilenamePolicy) -> Result<()> {
         ensure!(
             FIELDS.contains(&&rest[start + 1..end]),
             "unknown template placeholder"
+        );
+        ensure!(
+            !filename || &rest[start + 1..end] != "format_or_extension",
+            "format_or_extension is a directory-only placeholder"
         );
         rest = &rest[end + 1..];
     }
@@ -261,6 +267,28 @@ fn regular_filename(value: &str) -> String {
         None => sanitize(value),
     }
 }
+/// Keep filename fallback visibly separate from content-based classification.
+fn format_or_extension(row: &Occurrence) -> String {
+    use crate::detection::classifier::{Confidence, Format};
+    let detection = &row.detection;
+    if detection.detected_format == Format::Ambiguous {
+        return "ambiguous".into();
+    }
+    if !matches!(
+        detection.detected_format,
+        Format::Unknown | Format::NotEvaluated
+    ) && detection.confidence >= Confidence::Medium
+    {
+        return format!("detected/{}", detection.detected_format.as_str());
+    }
+    let extension = crate::detection::mismatch::normalize_extension(&row.original_extension);
+    let extension = sanitize(&extension);
+    if extension == "_" {
+        "undetected/no-extension".into()
+    } else {
+        format!("undetected/extension-{extension}")
+    }
+}
 /// Render a validated template using one occurrence's metadata.
 fn render(text: &str, row: &Occurrence, duplicate: bool, policy: FilenamePolicy) -> String {
     let mut result = String::new();
@@ -271,6 +299,7 @@ fn render(text: &str, row: &Occurrence, duplicate: bool, policy: FilenamePolicy)
         let value = match &rest[start + 1..end] {
             "file_type" => row.file_type.clone(),
             "detected_format" => row.detection.detected_format.as_str().into(),
+            "format_or_extension" => format_or_extension(row),
             "detected_family" => row.detection.detected_family.as_str().into(),
             "mismatch_status" => row.mismatch.status.as_str().into(),
             "original_name" => row.original_name.clone(),
@@ -285,7 +314,9 @@ fn render(text: &str, row: &Occurrence, duplicate: bool, policy: FilenamePolicy)
             "occurrence_id" => row.occurrence_id.clone(),
             _ => unreachable!("validated template"),
         };
-        if policy == FilenamePolicy::Regular && &rest[start + 1..end] == "original_name" {
+        if &rest[start + 1..end] == "format_or_extension" {
+            result.push_str(&value);
+        } else if policy == FilenamePolicy::Regular && &rest[start + 1..end] == "original_name" {
             result.push_str(&regular_filename(&value));
         } else {
             result.push_str(&sanitize(&value));
@@ -296,9 +327,19 @@ fn render(text: &str, row: &Occurrence, duplicate: bool, policy: FilenamePolicy)
     result
 }
 impl Rules {
+    pub fn uses_format_fallback(&self) -> bool {
+        self.organization
+            .default_directory
+            .contains("{format_or_extension}")
+            || self
+                .rules
+                .iter()
+                .any(|rule| rule.output.directory.contains("{format_or_extension}"))
+    }
     pub fn for_preset(preset: Preset) -> Self {
         let directory = match preset {
             Preset::ByFormat => "{detected_format}",
+            Preset::ByFormatOrExtension => "{format_or_extension}",
             Preset::ByExtension => "{original_extension}",
             Preset::ByMismatch => "{mismatch_status}",
         };

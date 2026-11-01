@@ -82,7 +82,18 @@ fn formats(extension: &str) -> Option<&'static [Format]> {
         "dylib" | "macho" => &[Macho],
         "pdf" => &[Pdf],
         "rtf" => &[Rtf],
-        "doc" | "xls" | "ppt" | "msi" => &[Cfb],
+        "doc" => &[Doc],
+        "xls" => &[Xls],
+        "ppt" => &[Ppt],
+        "msi" => &[Msi],
+        "dex" => &[Dex],
+        "class" => &[JavaClass],
+        "cab" => &[Cab],
+        "zst" | "zstd" => &[Zstd],
+        "lz4" => &[Lz4],
+        "ar" | "a" | "lib" => &[Ar],
+        "swf" => &[Swf],
+        "lnk" => &[Lnk],
         "docx" | "docm" => &[Docx],
         "xlsx" | "xlsm" => &[Xlsx],
         "pptx" | "pptm" => &[Pptx],
@@ -132,6 +143,12 @@ pub fn evaluate(filename: &str, detection: &Detection) -> Evaluation {
     } else if let Some(expected) = formats(&ext) {
         if expected.contains(&format) {
             (Match, "extension is registered for the detected format")
+        } else if format == Format::Cfb
+            && expected
+                .iter()
+                .any(|f| matches!(f, Format::Doc | Format::Xls | Format::Ppt | Format::Msi))
+        {
+            (Ambiguous, "CFB container subtype could not be established")
         } else if format == Format::Zip
             && expected.iter().any(|f| {
                 matches!(

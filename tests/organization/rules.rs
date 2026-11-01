@@ -9,6 +9,7 @@ use bfs::{organization::rules::Rules, repository::metadata::Occurrence};
 /// Build a deterministic occurrence fixture for rules tests.
 fn row(name: &str, id: char, hash: char) -> Occurrence {
     Occurrence {
+        nested: None,
         detection: Default::default(),
         mismatch: Default::default(),
         provenance: None,
@@ -168,4 +169,30 @@ fn regular_names_keep_long_extensions_and_legacy_records_stay_samples() {
             .is_err()
         );
     }
+}
+
+#[test]
+fn automatic_directory_keeps_ambiguity_legacy_and_unsafe_extensions_separate() {
+    use bfs::detection::classifier::{Confidence, Format};
+    let rules = Rules::parse(
+        "[organization]\nduplicates = 'all'\ndefault_directory = '{format_or_extension}'",
+    )
+    .unwrap();
+    let mut ambiguous = row("a.pdf", 'a', 'a');
+    ambiguous.detection.detected_format = Format::Ambiguous;
+    ambiguous.detection.confidence = Confidence::Medium;
+    let mut legacy = row("b.foo", 'b', 'b');
+    legacy.original_extension = "FoO".into();
+    let mut unsafe_extension = row("c", 'c', 'c');
+    unsafe_extension.original_extension = "../evil\\name".into();
+    let plan = rules.plan(&[ambiguous, legacy, unsafe_extension]).unwrap();
+    assert!(plan.iter().any(|p| p.path.starts_with("ambiguous/")));
+    assert!(
+        plan.iter()
+            .any(|p| p.path.starts_with("undetected/extension-foo/"))
+    );
+    assert!(
+        plan.iter()
+            .all(|p| !p.path.split('/').any(|component| component == ".."))
+    );
 }

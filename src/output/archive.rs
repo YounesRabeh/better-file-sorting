@@ -44,17 +44,34 @@ pub struct ZipExport {
 pub fn plan_exports(
     plan: &[crate::organization::rules::Planned],
     config: &crate::app::config::Config,
+    rules: &crate::organization::rules::Rules,
 ) -> Result<Vec<ZipExport>> {
     config.validate()?;
+    let exact_groups =
+        config.zip_each_dir && config.zip_dirs.is_empty() && rules.uses_format_fallback();
     let directories: BTreeSet<String> = if config.zip_dirs.is_empty() && config.zip_each_dir {
         plan.iter()
-            .filter_map(|p| p.path.split_once('/').map(|(d, _)| d.to_string()))
+            .filter_map(|p| {
+                let split = if exact_groups {
+                    p.path.rsplit_once('/')
+                } else {
+                    p.path.split_once('/')
+                };
+                split.map(|(directory, _)| directory.to_string())
+            })
             .collect()
     } else {
         config.zip_dirs.iter().cloned().collect()
     };
     let matches = |entry: &crate::organization::rules::Planned, directory: &str| {
-        entry.path.starts_with(&format!("{directory}/"))
+        if exact_groups {
+            entry
+                .path
+                .rsplit_once('/')
+                .is_some_and(|(parent, _)| parent == directory)
+        } else {
+            entry.path.starts_with(&format!("{directory}/"))
+        }
     };
     for directory in &directories {
         ensure!(
@@ -267,7 +284,7 @@ fn publish(
     serde_json::to_writer(
         &mut zip,
         &serde_json::json!({
-            "schema_version": 1, "kind": "bfsort-export", "tool_version": env!("CARGO_PKG_VERSION")
+            "schema_version": 2, "kind": "bfsort-export", "tool_version": env!("CARGO_PKG_VERSION")
         }),
     )?;
     zip.start_file("manifest.jsonl", options)?;
@@ -312,7 +329,7 @@ pub fn export_repository(
 ) -> Result<Vec<ZipExport>> {
     let records = crate::repository::metadata::load(repo.root())?;
     let plan = rules.plan(&records)?;
-    let mut exports = plan_exports(&plan, config)?;
+    let mut exports = plan_exports(&plan, config, rules)?;
     let existing: BTreeSet<_> = if config.resume {
         exports
             .iter()
@@ -554,7 +571,7 @@ fn verify_export_password(path: &Path, password: Option<&str>) -> Result<()> {
     };
     let header: serde_json::Value = serde_json::from_reader(std::io::Read::take(header, 65536))?;
     ensure!(
-        header["schema_version"] == 1 && header["kind"] == "bfsort-export",
+        header["schema_version"] == 2 && header["kind"] == "bfsort-export",
         "unsupported ZIP export metadata"
     );
     Ok(())

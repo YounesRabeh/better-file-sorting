@@ -21,6 +21,7 @@ needed. A sealed repository supports export preview, not payload export.
 | Preset | Groups by | Example output ZIPs |
 | --- | --- | --- |
 | `by-format` (default) | Saved content detection | `pdf.zip`, `pe.zip`, `elf.zip`, `unknown.zip` |
+| `by-format-or-extension` | Medium/high-confidence detected content, otherwise original extension | `detected/pdf.zip`, `undetected/extension-foo.zip`, `undetected/no-extension.zip`, `ambiguous.zip` |
 | `by-extension` | Original final filename extension, case-insensitively | `pdf.zip`, `exe.zip`, `bin.zip` |
 | `by-mismatch` | Saved extension/content agreement status | `match.zip`, `mismatch.zip`, `ambiguous.zip` |
 
@@ -35,6 +36,50 @@ occurrence suffixes; the exported ZIP can therefore contain repeated content.
 Use custom `--rules` when you want `first_only` or another duplicate policy.
 Do not combine `--rules` and `--preset`.
 
+## Automatic grouping with optional explicit rules
+
+```sh
+bfsort export ./repository --preset by-format-or-extension --zip-each-dir -o ./exports/automatic --resume
+```
+
+No format/extension list is required. Medium/high-confidence identified formats
+use `detected/<format>/`. Unknown, unevaluated and low-confidence content uses
+`undetected/extension-<extension>/`, or `undetected/no-extension/` when no usable
+extension exists. Conflicting detection uses `ambiguous/`. For example, generic
+printable text has low confidence and falls back to its filename extension.
+Fallback names are lowercase and sanitized; they do not establish content format.
+Every occurrence is retained, including duplicate hashes. Only nonempty groups
+produce ZIPs. New detector identifiers and arbitrary extensions become groups
+automatically. The existing `by-format` default remains available unchanged.
+
+With this grouping, `--zip-each-dir` creates a ZIP for each complete destination
+directory (`detected/pdf.zip`, rather than a combined `detected.zip`). Custom rules
+using `{format_or_extension}` get the same behavior, including their explicit
+override groups. Other rules/presets keep their top-level ZIP grouping.
+Explicit `--zip-dir` selections still include the selected directory's descendants.
+
+For automatic fallback **and** explicit selections in one run, use
+[rules.automatic.example.toml](../examples/rules.automatic.example.toml):
+
+```toml
+[organization]
+duplicates = "all"
+default_directory = "{format_or_extension}"
+
+[[rules]]
+name = "selected-pdfs"
+[rules.match]
+detected_format = "pdf"
+[rules.output]
+directory = "selected-pdfs"
+filename = "{sha256}.sample"
+```
+
+Run with `--rules examples/rules.automatic.example.toml` instead of `--preset`.
+The first matching rule controls its output; everything else gets the automatic
+fallback. `{format_or_extension}` is a directory-only placeholder. Detection,
+confidence and original extension remain separately recorded in the portable manifest.
+
 ## ZIP structure
 
 ```text
@@ -47,7 +92,7 @@ pdf.zip
 └── manifest.jsonl
 ```
 
-`export.json` declares `kind = "bfsort-export"`, `schema_version = 1`, and tool
+`export.json` declares `kind = "bfsort-export"`, `schema_version = 2`, and tool
 version. `layout.jsonl` maps exported paths to SHA-256 and occurrence identities.
 `manifest.jsonl` contains rows shaped as:
 
@@ -79,3 +124,8 @@ An extracted repository retains unique object content. Hard-link views do not
 add another payload copy. Each exported collection is an additional compressed
 copy. Peak storage includes staging/output ZIPs as well as source archives and
 repository objects. Compression ratios are data-dependent.
+
+Schema 2 supports nested provenance in occurrence records. Each nested record
+retains its parent occurrence/hash, root identity, depth and entry-index chain.
+A parent may be outside the selected ZIP; hashes and IDs still preserve the link.
+Older export schemas are rejected during resume verification.

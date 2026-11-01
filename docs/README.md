@@ -11,6 +11,7 @@ Choose a reference by task:
 | Understand reliability, security and performance | [Reliability guide](validation.md) |
 | Detect formats, report mismatches and export stored collections | [Detection and export guide](detection.md) |
 | Export by format, extension or mismatch | [Presets and portable exports](exports.md) |
+| Expand nested ZIPs or analyze existing archives | [Nested extraction](nested.md) |
 | Resume interrupted processing | [Recovery guide](recovery.md) |
 | Read the packaged release notes | [Release README](RELEASE_README.md) |
 | Inspect the benchmark output | [Benchmark results](benchmark-tmpfs.jsonl) |

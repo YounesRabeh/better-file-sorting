@@ -2,3 +2,6 @@
 
 pub mod classifier;
 pub mod mismatch;
+
+mod compound;
+mod headers;

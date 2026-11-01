@@ -84,3 +84,16 @@ immediately. No user deadline is imposed when `timeout_seconds` is omitted.
 
 Entry-level extraction continuation, HTTP Range continuation, a dedicated resume
 management command, and merge/split operations are not implemented.
+
+## Nested archives and reclassification
+
+With `[archive] nested_extraction = true`, completed direct extractions are saved
+under `operations/extraction/`. Resume verifies those receipts, reconstructs the
+root tree's logical budget, and retries only incomplete individual archives.
+Completed siblings are not decompressed again. Receipt replay can read entire
+stored objects for integrity verification; it does not promise zero I/O.
+
+`bfsort analyze REPOSITORY -c examples/nested.toml --resume` expands original stored
+ZIP occurrences without original downloads. `bfsort reclassify REPOSITORY --resume`
+refreshes detection without decompression. See [nested extraction](nested.md) for
+journal publication, sealed access limits, depth semantics and failure statuses.

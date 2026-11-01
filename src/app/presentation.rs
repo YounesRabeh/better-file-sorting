@@ -64,8 +64,8 @@ impl Progress {
         }
         bar.set_style(
             indicatif::ProgressStyle::with_template(match (total.is_some(), COLOR.load(Ordering::Relaxed)) {
-                (true, true) => "{prefix} [{wide_bar:.cyan/blue}] {pos}/{len} [{elapsed_precise}] {per_sec} ETA {eta} {msg}",
-                (true, false) => "{prefix} [{wide_bar}] {pos}/{len} [{elapsed_precise}] {per_sec} ETA {eta} {msg}",
+                (true, true) => "{prefix} [{wide_bar:.cyan/blue}] {pos}/{len} [{elapsed_precise}] {per_sec} {msg}",
+                (true, false) => "{prefix} [{wide_bar}] {pos}/{len} [{elapsed_precise}] {per_sec} {msg}",
                 (false, true) => "{prefix} {spinner:.cyan} [{elapsed_precise}] {msg}",
                 (false, false) => "{prefix} {spinner} [{elapsed_precise}] {msg}",
             })
@@ -138,6 +138,25 @@ pub fn stats(repository: &std::path::Path, summary: &crate::output::report::Summ
         bytes(summary.logical_bytes),
         mismatches
     );
+    if !summary.nested.occurrences_by_depth.is_empty()
+        || !summary.nested.archive_outcomes.is_empty()
+    {
+        let _ = write!(
+            text,
+            "\nNested archive analysis\n  Parent-child links: {}\n  Maximum sample depth: {}\n",
+            summary.nested.parent_child_relationships, summary.nested.maximum_depth
+        );
+        for (status, count) in &summary.nested.archive_outcomes {
+            let _ = writeln!(text, "  {:24} {}", safe_text(status), count);
+        }
+        for (depth, count) in &summary.nested.occurrences_by_depth {
+            let _ = writeln!(
+                text,
+                "  Depth {depth}: {count} occurrences / {} unique hashes",
+                summary.nested.unique_hashes_by_depth[depth]
+            );
+        }
+    }
     for (title, groups) in [
         ("Detected formats", &summary.by_detected_format),
         ("Detected families", &summary.by_detected_family),

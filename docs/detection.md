@@ -9,7 +9,7 @@ renders, follows links, or recursively extracts content. Permissions are not a s
 Each occurrence retains its original name, final original extension, archive entry,
 source provenance, SHA-256, size and identity. New `detection` metadata contains
 `detected_family`, `detected_format`, optional `mime_type`, `confidence`, `evidence`,
-`alternatives`, and `detector_version` (`bfs-1`). New `mismatch` metadata contains
+`alternatives`, and `detector_version` (`bfs-2`). New `mismatch` metadata contains
 `status` and `reason`. Detection is performed before the staging handle is sealed
 and published, using the prefix captured during the existing hash/copy pass.
 
@@ -23,25 +23,25 @@ Older bfsort binaries do not accept the new fields; use this version for new man
 Explicitly analyze an old **standard-mode** repository:
 
 ```sh
-bfsort analyze ./repository
+bfsort reclassify ./repository --resume
 ```
 
-This reads each unique object once for classification (without rehashing), then
+This hash-verifies each unique object and performs bounded classification, then
 atomically replaces `reports/classification.jsonl`. Original journals and payloads
 remain unchanged; metadata readers overlay only detection and mismatch fields.
 Analysis is cancellable and an interrupted analysis leaves the previous sidecar
-intact. Repeating analysis refreshes all records using the current detector.
+intact. Per-object checkpoints reuse detection with `--resume`; objects are still hash-verified. A new view is published using saved grouping rules; older views fall back to `by-format`.
 Sealed repositories are refused; bfsort never changes payload permissions automatically.
 
 ## Supported identifiers and evidence
 
 | Family | Format identifiers |
 | --- | --- |
-| executable | `pe`, `elf`, `macho`, `wasm` |
-| document | `pdf`, `rtf`, `cfb`, `docx`, `xlsx`, `pptx`, `html`, `xml` |
+| executable | `pe`, `elf`, `macho`, `wasm`, `dex`, `java_class` |
+| document | `pdf`, `rtf`, `cfb`, `doc`, `xls`, `ppt`, `docx`, `xlsx`, `pptx`, `html`, `xml`, `swf`, `lnk` |
 | script | `javascript`, `powershell`, `python`, `shell`, `batch` |
-| archive | `zip`, `rar`, `7z`, `tar`, `gzip`, `bzip2`, `xz` |
-| package | `jar`, `apk` |
+| archive | `zip`, `rar`, `7z`, `tar`, `gzip`, `bzip2`, `xz`, `cab`, `zstd`, `lz4`, `ar` |
+| package | `jar`, `apk`, `msi` |
 | image | `png`, `jpeg`, `gif`, `webp`, `bmp`, `tiff` |
 | database | `sqlite` |
 | text | `json`, `text` |
@@ -58,7 +58,7 @@ Confidence describes detection evidence, not safety:
 
 PE requires DOS and PE headers with bounded offset and optional-header checks;
 `MZ` alone is insufficient. ELF checks identification/header fields. Mach-O supports
-thin headers; Java's `CAFEBABE` is not inferred to be a Mach-O executable. PDF
+thin and big-endian universal headers, with at most 64 architecture records. Java class files require a supported version (45–70) and a bounded constant pool (up to 4,096 slots), so shared magic alone is insufficient. PDF
 headers are searched within the first 1 KiB. TAR checks the header checksum.
 Script detection relies on recognized interpreters in shebangs; ordinary prose
 and language-looking filenames do not establish a language. Batch/HTML/XML/JSON
@@ -73,17 +73,23 @@ validate document semantics or authenticity.
 
 ## Bounds and limitations
 
-The fast path retains the existing 8 KiB prefix per worker. Only ZIP candidates
+The fast path retains the existing 8 KiB prefix per worker. ZIP candidates
 use additional reads through the already-open handle: at most a 65,557-byte tail
 plus a 1 MiB directory, 4,096 entries and 4,096 bytes per name. Names are retained
 only within those limits. No entry is decompressed during subtype detection.
 This adds bounded transient directory/name allocations per ZIP worker, not a
-separate full-file read. Oversized, truncated, ZIP64 and multi-disk directories
+separate full-file read. CFB candidates can additionally read at most 1 MiB of
+allocation/directory metadata, at most 109 inline FAT sectors and 4,096 directory
+entries, with loop and offset checks. Discriminating stream names identify DOC,
+XLS and PPT; an installer root class identifier plus streams identifies MSI.
+Conflicts are ambiguous. Encryption markers, external DIFAT chains, malformed
+or over-budget metadata retain generic CFB. Stream content is not extracted.
+Oversized, truncated, ZIP64 and multi-disk directories
 remain generic ZIP. There is no mandatory new library, C runtime, external
 executable or signature database; `infer` remains in the legacy classifier.
 
 A signature is not full structural validation. Deeply embedded headers, binaries
-with PE headers beyond the prefix, unsupported fat Mach-O variants, non-UTF-8 or
+with PE headers beyond the prefix, unsupported fat Mach-O variants, non-UTF-8 text without a supported UTF-16 BOM, or
 truncated text, scripts without strong markers, and many polyglots can remain
 unknown, generic or undetected. `ambiguous` covers observed conflicting headers
 and subtype markers; it does not promise general polyglot discovery.
@@ -97,7 +103,7 @@ Double extensions have no independent verdict: `invoice.exe.pdf` is checked as
 PDF, and `document.pdf.exe` as EXE.
 
 The registry includes EXE/DLL/SYS/SCR/OCX/CPL → PE; ELF/SO → ELF; DYLIB/MACHO →
-Mach-O; DOC/XLS/PPT/MSI → CFB; DOCX/DOCM, XLSX/XLSM, PPTX/PPTM → the respective
+Mach-O; DOC/XLS/PPT/MSI → their detected CFB subtypes (generic CFB is ambiguous); DOCX/DOCM, XLSX/XLSM, PPTX/PPTM → the respective
 OOXML family; JS/MJS/CJS → JavaScript; PS1/PSM1 → PowerShell; PY → Python;
 SH/BASH/ZSH → shell; BAT/CMD → batch; HTML/HTM → HTML; XML/SVG → XML;
 JSON → JSON; TXT/LOG/CSV/MD → text. Archive aliases include GZ/TGZ/TAR.GZ,
@@ -195,3 +201,31 @@ the portable ZIP manifest and [recovery](recovery.md) for `--resume` verificatio
 Omitted extraction budgets are unlimited; the detector bounds above remain
 mandatory technical limits. Use [bounded configuration](../examples/bounded.toml)
 to opt into resource budgets.
+
+## Additional header formats
+
+DEX versions 035 and 037–040 require the 112-byte little-endian header and bounded
+section declarations; experimental containers and reverse-endian DEX remain
+unknown. CAB version 1.3 requires consistent header/size bounds. Zstandard checks
+frame descriptor and first block header; LZ4 checks frame flags and descriptor
+checksum. Skippable-only frames remain unknown. ar requires a valid first member
+header. SWF supports FWS/CWS/ZWS header checks without decompressing content.
+Shell links require the 76-byte header, class identifier and reserved fields.
+These checks identify formats, not full-file validity or safe content.
+
+UTF-16LE/BE BOM text uses the same conservative text/script rules as UTF-8.
+New suffix mappings include DEX, CLASS, CAB, ZST/ZSTD, LZ4, AR/A/LIB, SWF and LNK.
+Format recognition does not add extraction backends: recursive extraction remains
+ZIP-only, including recognized ZIP-backed packages and documents.
+
+Format references used for bounded checks:
+
+- [Android DEX specification](https://source.android.com/docs/core/runtime/dex-format)
+- [Java class-file specification](https://docs.oracle.com/en/java/javase/26/docs/specs/jvms/jvms-4.html)
+- [Apple universal Mach-O headers](https://github.com/apple-oss-distributions/xnu/blob/main/EXTERNAL_HEADERS/mach-o/fat.h)
+- [Microsoft Cabinet specification](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf)
+- [Zstandard frame specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md)
+- [LZ4 frame specification](https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md)
+- [Microsoft CFB specification](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb/)
+- [Microsoft Shell Link specification](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/)
+- [Adobe SWF specification](https://www.adobe.com/content/dam/acom/en/devnet/pdf/swf-file-format-spec.pdf)

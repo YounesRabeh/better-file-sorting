@@ -74,7 +74,7 @@ Repository security defaults to `sealed` (`0000` payload permissions). Select
 or explicit analysis. Existing repository security modes never change automatically.
 These permissions are not a sandbox.
 
-Grouping defaults to `--preset by-format`. Choose `by-extension` or `by-mismatch`,
+Grouping defaults to `--preset by-format`. Choose `by-format-or-extension`, `by-extension` or `by-mismatch`,
 or supply custom `--rules FILE`. Presets and custom rules are mutually exclusive.
 Presets retain every distinct occurrence; custom rules control duplicate policy.
 Archive-derived filenames remain safe `.sample` names. `--workers N` selects
@@ -106,6 +106,8 @@ persistent repository first, then export with `--resume`.
 
 `--zip-dir DIRECTORY` selects sorted directories; repeat to choose several.
 `--zip-each-dir` creates one ZIP per selected directory, or per top-level group.
+Automatic fallback grouping uses each full group directory, producing
+`detected/pdf.zip` and separate `undetected/extension-*.zip` files.
 `--output-password-file FILE` encrypts output with AES-256; the private `0600`
 file must contain exactly one nonempty password line. `--staging-dir DIRECTORY`
 selects an existing scratch directory. Output destinations are never overwritten.
@@ -154,14 +156,35 @@ portable metadata and [recovery](recovery.md) for verification costs.
 ```sh
 bfsort reorganize ./repository --preset by-extension --dry-run
 bfsort reorganize ./repository --rules ./rules.toml
-bfsort analyze ./repository
+bfsort reclassify ./repository --resume
+bfsort analyze ./repository -c ./examples/nested.toml --dry-run
+bfsort analyze ./repository -c ./examples/nested.toml --resume
 ```
 
 Reorganize adds a new view generation without extracting or reading payloads;
-old generations remain available. Analyze explicitly refreshes detection and
-mismatch metadata in standard repositories using a separate atomic sidecar.
-It does not modify payloads or original journals. Unsupported data versions fail
-with an error; use a fresh destination rather than modifying old data manually.
+old generations remain available. `reclassify` verifies and detects each unique
+stored object, publishes a complete classification sidecar, and rebuilds the view
+using its saved rules (older views without saved rules use `by-format`). Its
+`--resume` option reuses per-object detection checkpoints; `--dry-run` lists the
+unique-object count and detector version without writing.
+
+`analyze` expands supported ZIP objects already stored in a **standard-mode**
+repository. Original downloads are unnecessary. It preserves original records
+and adds child occurrences with parent links. Analysis depth starts at each
+existing archive occurrence, independently from its historical outer download.
+`--dry-run` previews candidates, reusable direct extraction receipts and limits;
+expanded sizes remain unknown. Repeated analysis is idempotent. Completed direct
+extractions are always cached; `--resume` documents intent to continue previous
+work and is also accepted for consistency with ingestion.
+
+Neither operation changes stored sample bytes or unlocks sealed payloads.
+Unsupported schemas fail explicitly. See [nested extraction](nested.md) for
+configuration, depth examples, budgets and failure behavior.
+
+Automatic grouping with extension fallback is available through
+`--preset by-format-or-extension`. Custom rules can use `{format_or_extension}`
+as their default directory and override selected formats or extensions. See
+[presets and exports](exports.md#automatic-grouping-with-optional-explicit-rules).
 
 ## Configuration validation
 

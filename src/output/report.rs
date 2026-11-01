@@ -16,6 +16,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Serialize)]
 pub struct Summary {
+    pub nested: crate::ingest::nested::NestedSummary,
     pub occurrences: usize,
     pub unique_samples: usize,
     pub duplicate_occurrences: usize,
@@ -90,6 +91,7 @@ pub fn summary(repo: &Repository, records: &[Occurrence]) -> Result<Summary> {
         }
     }
     Ok(Summary {
+        nested: crate::ingest::nested::summary(repo, records)?,
         occurrences: records.len(),
         unique_samples: hashes.len(),
         duplicate_occurrences: records.len() - hashes.len(),

@@ -1,0 +1,19 @@
+# Ingest mixed ZIP downloads, expanding up to two nested ZIP boundaries.
+inputs = ["./incoming"]
+input_mode = "archives"
+output = "./repository"
+preset = "by-format"
+workers = 4
+resume = true
+
+[security]
+# Choose this before ingestion if later analysis or payload exports are needed.
+mode = "standard"
+
+[archive]
+nested_extraction = true
+max_depth = 2
+# Per root tree, including decompressed nested ZIP bytes and duplicate occurrences.
+# Four active roots may each consume these budgets.
+max_total_expanded_bytes = "20 GiB"
+max_total_entries = 100000
