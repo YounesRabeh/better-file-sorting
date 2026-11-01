@@ -44,6 +44,23 @@ flowchart LR
     Layout --> Export[Optional ZIP output]
 ```
 
+## Detailed content detection
+
+bfsort now stores precise formats and filename/content mismatch decisions alongside
+its legacy categories. It recognizes executable, Office/ZIP package, archive,
+image, database and strongly marked script formats. Reports work from metadata,
+including sealed repositories; a mismatch is not a malware verdict.
+
+```bash
+bfsort report mismatches ./organized --format csv --output mismatches.csv
+bfsort stats ./organized --json
+bfsort export ./standard-repository --rules examples/rules.formats.example.toml --zip-each-dir -o ./by-format
+```
+
+See [detection, compatibility and export guide](docs/detection.md) for supported
+formats, bounded inspection, explicit legacy analysis, multiple independent
+exports and limitations. Payload exports require a standard-mode repository.
+
 ## Showcase
 
 One policy can group files by detected type and retain their original names.
@@ -89,18 +106,18 @@ or build from source with stable Rust and Rust 2024 support:
 cargo build --release --locked
 ```
 
-The examples below use `bfs` on your `PATH`. For a local build, replace `bfs`
-with `target/release/bfs`.
+The examples below use `bfsort` on your `PATH`. For a local build, replace `bfsort`
+with `target/release/bfsort`.
 
 Copy the regular-file policy, then preview and export a folder:
 
 ```sh
-cp rules.files.example.toml rules.toml
+cp examples/rules.files.example.toml rules.toml
 
-bfs ingest ./documents --input-mode files --rules ./rules.toml \
+bfsort ingest ./documents --input-mode files --rules ./rules.toml \
   --output ./sorted.zip --zip --dry-run
 
-bfs ingest ./documents --input-mode files --rules ./rules.toml \
+bfsort ingest ./documents --input-mode files --rules ./rules.toml \
   --output ./sorted.zip --zip
 ```
 
@@ -114,26 +131,26 @@ runs. Already-compressed files may shrink little or produce a larger ZIP.
 For the default workflow, no configuration file is required:
 
 ```sh
-bfs collect https://example.org/downloads/ --dry-run
-bfs collect https://example.org/downloads/
+bfsort collect https://example.org/downloads/ --dry-run
+bfsort collect https://example.org/downloads/
 # Explicitly unlock the completed receipt-owned payloads before extraction.
-bfs ingest --extract
-bfs stats
+bfsort ingest --extract
+bfsort stats
 ```
 
 Downloads use three workers with no pacing delay or speed, request-count, file-count,
 or byte caps. Network timeouts, sealed permissions and extraction safeguards remain
-active. `bfs ingest` uses completed default download receipts, or `./incoming` when
-none are configured/present; output defaults to `./organized`. `bfs inspect` reads
-`./incoming`; `bfs reorganize --dry-run` previews default rules for `./organized`.
+active. `bfsort ingest` uses completed default download receipts, or `./incoming` when
+none are configured/present; output defaults to `./organized`. `bfsort inspect` reads
+`./incoming`; `bfsort reorganize --dry-run` previews default rules for `./organized`.
 
-Use [collection.example.toml](collection.example.toml) to discover direct ZIP links
+Use [examples/collection.example.toml](examples/collection.example.toml) to discover direct ZIP links
 on one HTTP(S) page, preview selection, and download into sealed private staging:
 
 ```sh
-bfs discover --config collection.toml
-bfs download --config collection.toml --dry-run
-bfs download --config collection.toml
+bfsort discover --config collection.toml
+bfsort download --config collection.toml --dry-run
+bfsort download --config collection.toml
 ```
 
 > [!NOTE]
@@ -142,13 +159,13 @@ bfs download --config collection.toml
 
 ```sh
 chmod 600 ./collection/downloads/payloads/FILE.zip
-bfs ingest --config collection.toml --dry-run
-bfs ingest --config collection.toml
+bfsort ingest --config collection.toml --dry-run
+bfsort ingest --config collection.toml
 ```
 
 Ingest with no explicit input paths verifies completed receipts and hashes before
 processing. Explicit local inputs keep their existing behavior. Completed downloads
-are retained; BFS never automatically unseals or deletes them. After unlocking,
+are retained; bfsort never automatically unseals or deletes them. After unlocking,
 `download` intentionally refuses reuse until you explicitly reseal the files
 with `chmod 000`. Sealing is a file-permission safeguard, not a sandbox.
 
@@ -158,7 +175,7 @@ See [acquisition configuration](docs/commands.md#acquisition-commands) for limit
 
 ## Usage
 
-CLI options override [runtime configuration](config.example.toml). Sorting rules
+CLI options override [runtime configuration](examples/config.example.toml). Sorting rules
 are shared across repository and ZIP output. See the [command reference](docs/commands.md)
 for every argument, default, report field, and exit code.
 
@@ -173,21 +190,21 @@ when file mode is selected.
 
 | Task | Command |
 | --- | --- |
-| Show all ingest options | `bfs ingest --help` |
-| Sort ordinary files into a readable private repository | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --output ./organized --security-mode standard` |
-| Inspect ZIP metadata without extracting contents | `bfs inspect ./incoming` |
-| Ingest ZIP entries into a sealed repository | `bfs ingest ./incoming --extract --rules ./rules.example.toml --output ./samples` |
-| Preview destinations before ingest | `bfs ingest ./incoming --extract --rules ./rules.example.toml --output ./samples --dry-run` |
-| Show repository statistics | `bfs stats ./organized` |
-| Preview new rules for an existing repository | `bfs reorganize ./organized --rules ./rules.toml --dry-run` |
-| Publish a new view with updated rules | `bfs reorganize ./organized --rules ./rules.toml` |
-| Limit discovery to immediate children | `bfs ingest ./documents --input-mode files --recursive false --output ./organized` |
-| Load runtime settings from TOML | `bfs ingest --config ./config.toml` |
+| Show all ingest options | `bfsort ingest --help` |
+| Sort ordinary files into a readable private repository | `bfsort ingest ./documents --input-mode files --rules ./examples/rules.files.example.toml --output ./organized --security-mode standard` |
+| Inspect ZIP metadata without extracting contents | `bfsort inspect ./incoming` |
+| Ingest ZIP entries into a sealed repository | `bfsort ingest ./incoming --extract --rules ./examples/rules.example.toml --output ./samples` |
+| Preview destinations before ingest | `bfsort ingest ./incoming --extract --rules ./examples/rules.example.toml --output ./samples --dry-run` |
+| Show repository statistics | `bfsort stats ./organized` |
+| Preview new rules for an existing repository | `bfsort reorganize ./organized --rules ./rules.toml --dry-run` |
+| Publish a new view with updated rules | `bfsort reorganize ./organized --rules ./rules.toml` |
+| Limit discovery to immediate children | `bfsort ingest ./documents --input-mode files --recursive false --output ./organized` |
+| Load runtime settings from TOML | `bfsort ingest --config ./config.toml` |
 
 </details>
 
 The default filename policy requires `.sample` filenames. The
-[regular-file policy](rules.files.example.toml) preserves ordinary names and
+[regular-file policy](examples/rules.files.example.toml) preserves ordinary names and
 extensions. Archive inputs and archive-derived records refuse the regular
 policy; older metadata without input-mode provenance is treated as archive-derived.
 Empty directories are not copied.
@@ -207,13 +224,13 @@ exactly one nonempty line. Password files and their hard links are excluded from
 
 | Task | Command |
 | --- | --- |
-| Sort ordinary files into a ZIP | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip --output ./sorted.zip` |
-| ZIP selected sorted directories together | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip-dir documents/pdf --zip-dir text --output ./selected.zip` |
-| Create one ZIP per top-level sorted directory | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip-each-dir --output ./exports` |
-| Create separate ZIPs for selected directories | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip-dir documents/pdf --zip-dir text --zip-each-dir --output ./exports` |
-| Encrypt the output ZIP with AES-256 | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip --output ./private.zip --output-password-file ./output-password.txt` |
-| Decrypt archive inputs and export their sorted contents | `bfs ingest ./incoming --extract --password-file ./input-passwords.txt --rules ./rules.example.toml --zip --output ./sorted.zip` |
-| Select temporary storage for ZIP output | `bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml --zip --output ./sorted.zip --staging-dir /existing/scratch` |
+| Sort ordinary files into a ZIP | `bfsort ingest ./documents --input-mode files --rules ./examples/rules.files.example.toml --zip --output ./sorted.zip` |
+| ZIP selected sorted directories together | `bfsort ingest ./documents --input-mode files --rules ./examples/rules.files.example.toml --zip-dir documents/pdf --zip-dir text --output ./selected.zip` |
+| Create one ZIP per top-level sorted directory | `bfsort ingest ./documents --input-mode files --rules ./examples/rules.files.example.toml --zip-each-dir --output ./exports` |
+| Create separate ZIPs for selected directories | `bfsort ingest ./documents --input-mode files --rules ./examples/rules.files.example.toml --zip-dir documents/pdf --zip-dir text --zip-each-dir --output ./exports` |
+| Encrypt the output ZIP with AES-256 | `bfsort ingest ./documents --input-mode files --rules ./examples/rules.files.example.toml --zip --output ./private.zip --output-password-file ./output-password.txt` |
+| Decrypt archive inputs and export their sorted contents | `bfsort ingest ./incoming --extract --password-file ./input-passwords.txt --rules ./examples/rules.example.toml --zip --output ./sorted.zip` |
+| Select temporary storage for ZIP output | `bfsort ingest ./documents --input-mode files --rules ./examples/rules.files.example.toml --zip --output ./sorted.zip --staging-dir /existing/scratch` |
 
 </details>
 
@@ -277,9 +294,9 @@ Choose a reference by task, or browse the [documentation hub](docs/README.md).
 | I want to… | Start here |
 | --- | --- |
 | Look up commands, options, report fields, or exit codes | [Command reference](docs/commands.md) |
-| Configure discovery, limits, workers, and staging | [Runtime configuration](config.example.toml) |
-| Customize sample sorting and duplicate handling | [Sample rules](rules.example.toml) |
-| Preserve ordinary filenames and extensions | [Regular-file rules](rules.files.example.toml) |
+| Configure discovery, limits, workers, and staging | [Runtime configuration](examples/config.example.toml) |
+| Customize sample sorting and duplicate handling | [Sample rules](examples/rules.example.toml) |
+| Preserve ordinary filenames and extensions | [Regular-file rules](examples/rules.files.example.toml) |
 | Read packaged release usage notes | [Release guide](docs/RELEASE_README.md) |
 | Review validation evidence and limitations | [Validation record](docs/validation.md) |
 

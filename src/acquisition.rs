@@ -353,7 +353,7 @@ pub fn load_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
 }
 pub fn load_inventory(path: &Path) -> Result<Inventory> {
     use anyhow::Context;
-    let value: serde_json::Value = load_json(path).with_context(|| format!("collection inventory could not be read: {}\nHint: run `bfs discover -c collection.toml` or `bfs collect -c collection.toml`; check the path and permissions.", path.display()))?;
+    let value: serde_json::Value = load_json(path).with_context(|| format!("collection inventory could not be read: {}\nHint: run `bfsort discover -c collection.toml` or `bfsort collect -c collection.toml`; check the path and permissions.", path.display()))?;
     ensure!(
         value.get("version").and_then(serde_json::Value::as_u64) == Some(2),
         "unsupported discovery inventory; re-discover into a fresh collection (old acquisition formats are unsupported)"

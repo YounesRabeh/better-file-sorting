@@ -18,8 +18,8 @@ fn storage_fails_closed_without_acl_backend() {
 /// Ensure shipped example configuration files remain parseable.
 fn example_configuration_and_rules_are_valid() {
     let config: bfs::config::Config =
-        toml::from_str(include_str!("../config.example.toml")).unwrap();
+        toml::from_str(include_str!("../examples/config.example.toml")).unwrap();
     config.validate().unwrap();
-    bfs::rules::Rules::parse(include_str!("../rules.example.toml")).unwrap();
-    bfs::rules::Rules::parse(include_str!("../rules.files.example.toml")).unwrap();
+    bfs::rules::Rules::parse(include_str!("../examples/rules.example.toml")).unwrap();
+    bfs::rules::Rules::parse(include_str!("../examples/rules.files.example.toml")).unwrap();
 }

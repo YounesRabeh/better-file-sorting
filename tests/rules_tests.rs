@@ -9,6 +9,8 @@ use bfs::{metadata::Occurrence, rules::Rules};
 /// Build a deterministic occurrence fixture for rules tests.
 fn row(name: &str, id: char, hash: char) -> Occurrence {
     Occurrence {
+        detection: Default::default(),
+        mismatch: Default::default(),
         provenance: None,
         input_mode: bfs::config::InputMode::Archives,
         occurrence_id: id.to_string().repeat(64),

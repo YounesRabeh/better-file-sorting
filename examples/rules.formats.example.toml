@@ -1,0 +1,7 @@
+# Usage: bfsort export ./repository --rules examples/rules.formats.example.toml --zip-each-dir -o ./by-format
+version = 1
+[organization]
+default_directory = "{detected_format}"
+default_filename = "{sha256}.sample"
+# Choose all to keep distinct source occurrences, including repeated hashes.
+duplicates = "first_only"

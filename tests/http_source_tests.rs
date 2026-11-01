@@ -136,7 +136,7 @@ fn discover_url_cli_writes_default_inventory_without_config() {
         write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
     });
     let temp = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_bfs"))
+    let output = Command::new(env!("CARGO_BIN_EXE_bfsort"))
         .args(["discover", &url])
         .current_dir(temp.path())
         .output()
@@ -186,7 +186,7 @@ fn default_workflow_needs_no_config_file() {
     });
     let temp = tempfile::tempdir().unwrap();
     let run = |args: &[&str]| {
-        let result = Command::new(env!("CARGO_BIN_EXE_bfs"))
+        let result = Command::new(env!("CARGO_BIN_EXE_bfsort"))
             .args(args)
             .current_dir(temp.path())
             .output()

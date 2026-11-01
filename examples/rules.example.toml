@@ -1,5 +1,5 @@
 # ARCHIVE SORTING POLICY — safe .sample names for extracted ZIP entries.
-# Usage: bfs ingest ./downloads --rules rules.toml
+# Usage: bfsort ingest ./downloads --rules rules.toml
 # This is a rules file, not a --config runtime file.
 # Reference: docs/configuration.md#sorting-rule-settings.
 
@@ -14,6 +14,7 @@ duplicates = "first_only"
 # Use hardlink for links to stored payloads (retaining permissions), or manifest for metadata only.
 view_mode = "hardlink"
 # Destination directory template used when no matching rule overrides it.
+# Precise alternative: "{detected_format}"; also available: {detected_family}, {mismatch_status}.
 default_directory = "{file_type}"
 # Destination filename template used when no matching rule overrides it.
 default_filename = "{sha256}.sample"

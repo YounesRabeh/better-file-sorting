@@ -197,6 +197,73 @@ fn run(cli: Cli) -> Result<u8> {
             )?;
             Ok(0)
         }
+        Command::Report {
+            command: bfs::cli::ReportCommand::Mismatches(args),
+        } => {
+            let repo = bfs::storage::Repository::existing(&args.repository)?;
+            let records = bfs::metadata::load(repo.root())?;
+            let report =
+                bfs::report::mismatches(&records, &args.status, args.min_confidence, args.all);
+            let format = if ui.json && matches!(args.format, bfs::report::ReportFormat::Table) {
+                bfs::report::ReportFormat::Json
+            } else {
+                args.format
+            };
+            if let Some(path) = args.output {
+                bfs::discovery::check_path(&path)?;
+                let parent = path
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .unwrap_or(std::path::Path::new("."));
+                let mut file = tempfile::NamedTempFile::new_in(parent)?;
+                report.write(&mut file, format)?;
+                file.as_file().sync_all()?;
+                file.persist_noclobber(&path)?;
+                std::fs::File::open(parent)?.sync_all()?;
+            } else if !ui.quiet {
+                report.write(std::io::stdout().lock(), format)?;
+            }
+            Ok(0)
+        }
+        Command::Analyze { repository } => {
+            let repo = bfs::storage::Repository::existing(&repository)?;
+            let count = bfs::metadata::analyze(&repo, cancellation()?.as_ref())?;
+            output(
+                ui,
+                &serde_json::json!({"analyzed_occurrences": count}),
+                &format!("Analyzed: {count} occurrences"),
+            )?;
+            Ok(0)
+        }
+        Command::Export(args) => {
+            let repo = bfs::storage::Repository::existing(&args.repository)?;
+            let rules = bfs::rules::Rules::load(args.rules.as_deref())?;
+            let config = Config {
+                output: args.output,
+                zip: true,
+                zip_each_dir: args.zip_each_dir,
+                zip_dirs: args.zip_dirs,
+                output_password_file: args.output_password_file,
+                ..Config::default()
+            };
+            let exports = bfs::archive::export_repository(
+                &repo,
+                &rules,
+                &config,
+                args.dry_run,
+                cancellation()?.as_ref(),
+            )?;
+            output(
+                ui,
+                &exports,
+                &format!(
+                    "{}: {} ZIP collections",
+                    if args.dry_run { "Preview" } else { "Exported" },
+                    exports.len()
+                ),
+            )?;
+            Ok(0)
+        }
         Command::Stats { repository } => {
             let repo = bfs::storage::Repository::existing(&repository)?;
             let records = bfs::metadata::load(repo.root())?;

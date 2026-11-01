@@ -1,5 +1,5 @@
 # LOCAL INGEST — input paths, output, workers, security and extraction limits.
-# Usage: bfs organize -c config.toml
+# Usage: bfsort organize -c config.toml
 # Both organize and ingest default to files. Pass --extract to open ZIP contents.
 # Sorting rules belong in a separate file referenced by rules below.
 # Reference: docs/configuration.md; CLI overrides TOML.
@@ -36,7 +36,7 @@ workers = 4
 mode = "sealed"
 # Require owner-only directories (0700); disabling this safeguard is rejected.
 restrict_directories = true
-# Must remain false; BFS never automatically restores access to sealed payloads.
+# Must remain false; bfsort never automatically restores access to sealed payloads.
 allow_automatic_unsealing = false
 
 # Extraction limits (not download budgets)

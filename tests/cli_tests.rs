@@ -10,13 +10,16 @@ use std::process::Command;
 #[test]
 /// Ensure help exposes every top-level command.
 fn help_lists_commands() {
-    let out = Command::new(env!("CARGO_BIN_EXE_bfs"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bfsort"))
         .arg("--help")
         .output()
         .unwrap();
     assert!(out.status.success());
     let help = String::from_utf8(out.stdout).unwrap();
-    assert!(help.contains("Usage: bfs"), "unexpected CLI name: {help}");
+    assert!(
+        help.contains("Usage: bfsort"),
+        "unexpected CLI name: {help}"
+    );
     for command in ["ingest", "inspect", "stats", "reorganize"] {
         assert!(help.contains(command), "missing {command}");
     }
@@ -29,7 +32,7 @@ fn rejects_invalid_configuration_before_output_creation() {
     let config = dir.path().join("config.toml");
     std::fs::write(&config, "workers = 0\n").unwrap();
     let output = dir.path().join("repo");
-    let status = Command::new(env!("CARGO_BIN_EXE_bfs"))
+    let status = Command::new(env!("CARGO_BIN_EXE_bfsort"))
         .args(["ingest", "--config"])
         .arg(config)
         .arg("--output")
@@ -79,7 +82,7 @@ fn local_default_workflow_uses_incoming_and_organized() {
         vec!["stats"],
         vec!["reorganize", "--dry-run"],
     ] {
-        let result = Command::new(env!("CARGO_BIN_EXE_bfs"))
+        let result = Command::new(env!("CARGO_BIN_EXE_bfsort"))
             .args(&args)
             .current_dir(temp.path())
             .output()
@@ -131,7 +134,7 @@ fn default_config_and_overrides_are_local() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(temp.path().join("bfs.toml"), "workers = 0").unwrap();
     let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_bfs"))
+        Command::new(env!("CARGO_BIN_EXE_bfsort"))
             .current_dir(temp.path())
             .args(args)
             .output()

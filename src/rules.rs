@@ -17,6 +17,9 @@ use unicode_normalization::UnicodeNormalization;
 
 const FIELDS: &[&str] = &[
     "file_type",
+    "detected_format",
+    "detected_family",
+    "mismatch_status",
     "original_name",
     "original_stem",
     "original_extension",
@@ -81,6 +84,8 @@ impl Default for Organization {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Matcher {
+    pub detected_format: Option<crate::classifier::Format>,
+    pub mismatch_status: Option<crate::mismatch::Status>,
     pub file_type: Option<String>,
     pub original_extension: Option<String>,
     pub encrypted: Option<bool>,
@@ -95,7 +100,12 @@ pub struct Matcher {
 impl Matcher {
     /// Check whether this matcher accepts one occurrence.
     fn matches(&self, row: &Occurrence, duplicate: bool) -> bool {
-        self.file_type.as_ref().is_none_or(|v| v == &row.file_type)
+        self.detected_format
+            .is_none_or(|v| v == row.detection.detected_format)
+            && self
+                .mismatch_status
+                .is_none_or(|v| v == row.mismatch.status)
+            && self.file_type.as_ref().is_none_or(|v| v == &row.file_type)
             && self
                 .original_extension
                 .as_ref()
@@ -242,6 +252,9 @@ fn render(text: &str, row: &Occurrence, duplicate: bool, policy: FilenamePolicy)
         let end = rest[start..].find('}').expect("validated template") + start;
         let value = match &rest[start + 1..end] {
             "file_type" => row.file_type.clone(),
+            "detected_format" => row.detection.detected_format.as_str().into(),
+            "detected_family" => row.detection.detected_family.as_str().into(),
+            "mismatch_status" => row.mismatch.status.as_str().into(),
             "original_name" => row.original_name.clone(),
             "original_stem" => row.original_stem.clone(),
             "original_extension" => row.original_extension.clone(),

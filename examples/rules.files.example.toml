@@ -1,5 +1,5 @@
 # REGULAR-FILE SORTING POLICY — preserve names without extracting ZIP files.
-# Usage: bfs ingest ./documents --input-mode files --rules rules.files.toml
+# Usage: bfsort ingest ./documents --input-mode files --rules rules.files.toml
 # This is a rules file, not a --config runtime file.
 # Reference: docs/configuration.md#sorting-rule-settings.
 
@@ -28,5 +28,5 @@ original_extension = "pdf"
 [rules.output]
 # Sorted destination directory template for entries matching this rule.
 directory = "documents/pdf"
-# Preserve the original filename for matching ordinary files; collisions are resolved by BFS.
+# Preserve the original filename for matching ordinary files; collisions are resolved by bfsort.
 filename = "{original_name}"

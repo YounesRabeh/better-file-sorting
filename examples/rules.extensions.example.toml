@@ -1,0 +1,7 @@
+# Usage: bfsort export ./repository --rules examples/rules.extensions.example.toml --zip-each-dir -o ./by-extension
+version = 1
+[organization]
+default_directory = "{original_extension}"
+default_filename = "{sha256}.sample"
+# Keep every filename/extension association; deterministic suffixes resolve collisions.
+duplicates = "all"

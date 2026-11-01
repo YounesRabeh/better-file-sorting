@@ -1,8 +1,8 @@
-# The limits below are an opt-in bounded preset; bare bfs download has no byte/count caps.
+# The limits below are an opt-in bounded preset; bare bfsort download has no byte/count caps.
 # WEB COLLECTION — discover ZIP links, download sealed payloads, then ingest.
-# Usage: bfs collect -c collection.toml
+# Usage: bfsort collect -c collection.toml
 # --dry-run may request HTML metadata, but never downloads payloads.
-# Explicitly unlock completed payloads before bfs ingest --config collection.toml.
+# Explicitly unlock completed payloads before bfsort ingest --config collection.toml.
 # No inputs field: ingest uses verified completion receipts.
 # Reference: docs/configuration.md and docs/commands.md#acquisition-commands.
 
@@ -14,7 +14,7 @@ output = "./sorted.zip"
 # Export a ZIP instead of a repository; output must name a new ZIP file.
 zip = true
 # Path to the TOML policy defining matching, destination paths and duplicate handling.
-rules = "./rules.example.toml"
+rules = "./examples/rules.example.toml"
 
 # Stage 1: page discovery
 [source]

@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(
+    name = "bfsort",
     version,
     about = "Sort files or ZIP samples by metadata without executing their contents"
 )]
@@ -46,6 +47,18 @@ pub enum Command {
         #[arg(default_value = crate::config::DEFAULT_REPOSITORY)]
         repository: PathBuf,
     },
+    /// Report filename/content inconsistencies from stored metadata
+    Report {
+        #[command(subcommand)]
+        command: ReportCommand,
+    },
+    /// Explicitly refresh detection metadata in a standard repository
+    Analyze {
+        #[arg(default_value = crate::config::DEFAULT_REPOSITORY)]
+        repository: PathBuf,
+    },
+    /// Export an independent ZIP layout using existing objects and metadata
+    Export(Export),
     /// Build a new view from metadata without unlocking payloads
     Reorganize {
         #[arg(default_value = crate::config::DEFAULT_REPOSITORY)]
@@ -179,4 +192,42 @@ pub struct Presentation {
     /// Machine-readable stdout; disables ANSI and progress on both streams
     #[arg(long, global = true)]
     pub json: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ReportCommand {
+    Mismatches(MismatchArgs),
+}
+#[derive(Debug, Args)]
+pub struct MismatchArgs {
+    #[arg(default_value = crate::config::DEFAULT_REPOSITORY)]
+    pub repository: PathBuf,
+    #[arg(long, value_enum, default_value = "table")]
+    pub format: crate::report::ReportFormat,
+    #[arg(short = 'o', long)]
+    pub output: Option<PathBuf>,
+    #[arg(long, value_enum, value_delimiter = ',')]
+    pub status: Vec<crate::mismatch::Status>,
+    #[arg(long, value_enum, default_value = "unknown")]
+    pub min_confidence: crate::classifier::Confidence,
+    /// Include all statuses; --status takes precedence
+    #[arg(long)]
+    pub all: bool,
+}
+#[derive(Debug, Args)]
+pub struct Export {
+    #[arg(default_value = crate::config::DEFAULT_REPOSITORY)]
+    pub repository: PathBuf,
+    #[arg(long)]
+    pub rules: Option<PathBuf>,
+    #[arg(short = 'o', long)]
+    pub output: PathBuf,
+    #[arg(long)]
+    pub zip_each_dir: bool,
+    #[arg(long = "zip-dir")]
+    pub zip_dirs: Vec<String>,
+    #[arg(long)]
+    pub output_password_file: Option<PathBuf>,
+    #[arg(long)]
+    pub dry_run: bool,
 }

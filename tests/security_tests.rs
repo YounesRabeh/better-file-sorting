@@ -95,7 +95,7 @@ fn forced_stop_leaves_no_readable_payload_and_next_ingest_recovers() {
     }
     zip.finish().unwrap();
     let output = dir.path().join("repo");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_bfs"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_bfsort"))
         .arg("--json")
         .args(["ingest", "--extract"])
         .arg(&input)

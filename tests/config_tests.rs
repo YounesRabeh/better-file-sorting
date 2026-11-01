@@ -11,7 +11,7 @@ fn ingest(config: &str, args: &[&str]) -> std::process::Output {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(&path, config).unwrap();
-    Command::new(env!("CARGO_BIN_EXE_bfs"))
+    Command::new(env!("CARGO_BIN_EXE_bfsort"))
         .args(["ingest", "--config"])
         .arg(path)
         .args(args)
@@ -65,7 +65,7 @@ fn extraction_limits_accept_readable_sizes_and_legacy_bytes() {
         );
     }
     let example: bfs::config::Config =
-        toml::from_str(include_str!("../config.example.toml")).unwrap();
+        toml::from_str(include_str!("../examples/config.example.toml")).unwrap();
     example.validate().unwrap();
 }
 

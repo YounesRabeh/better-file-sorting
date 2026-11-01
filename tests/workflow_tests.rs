@@ -70,7 +70,7 @@ impl Drop for Server {
     }
 }
 fn run(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_bfs"))
+    Command::new(env!("CARGO_BIN_EXE_bfsort"))
         .current_dir(dir)
         .args(args)
         .output()
@@ -332,7 +332,7 @@ fn ctrl_c_stops_parallel_transfers_without_publishing_partials() {
     let server = Server::new();
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("collection.toml"), format!("[source]\npage = {:?}\n[download]\nmax_speed = '1 B/s'\nfilename = '{{source_id}}'\nconcurrency = 2\ntimeout_seconds = 2\n", server.url)).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_bfs"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_bfsort"))
         .current_dir(dir.path())
         .args(["collect", "-c", "collection.toml", "--json"])
         .stdout(std::process::Stdio::piped())

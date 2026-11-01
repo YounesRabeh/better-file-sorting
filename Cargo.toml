@@ -35,3 +35,11 @@ rustix = { version = "1", features = ["fs"] }
 [[bench]]
 name = "throughput"
 harness = false
+
+[[bench]]
+name = "detection"
+harness = false
+
+[[bin]]
+name = "bfsort"
+path = "src/main.rs"

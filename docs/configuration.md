@@ -6,10 +6,10 @@
 
 | Example | Purpose | Used by | Start with |
 | --- | --- | --- | --- |
-| [config.example.toml](../config.example.toml) | Local inputs, output, ingest workers, security and extraction limits | `ingest --config`, `inspect --config` | Copy to `config.toml` for local files or ZIPs |
-| [collection.example.toml](../collection.example.toml) | Web page, download policies, staging and transfer limits, plus eventual ingest output | `discover --config`, `download --config`, `ingest --config` | Copy to `collection.toml` and replace the example page URL |
-| [rules.example.toml](../rules.example.toml) | Sorting extracted ZIP entries using safe `.sample` names | `ingest --rules`, `reorganize --rules`, or runtime `rules` field | Copy to `rules.toml` for archive inputs |
-| [rules.files.example.toml](../rules.files.example.toml) | Sorting ordinary files while preserving filenames | Same rules options, with file-mode ingest | Copy to `rules.toml` for `--input-mode files` |
+| [examples/config.example.toml](../examples/config.example.toml) | Local inputs, output, ingest workers, security and extraction limits | `ingest --config`, `inspect --config` | Copy to `config.toml` for local files or ZIPs |
+| [examples/collection.example.toml](../examples/collection.example.toml) | Web page, download policies, staging and transfer limits, plus eventual ingest output | `discover --config`, `download --config`, `ingest --config` | Copy to `collection.toml` and replace the example page URL |
+| [examples/rules.example.toml](../examples/rules.example.toml) | Sorting extracted ZIP entries using safe `.sample` names | `ingest --rules`, `reorganize --rules`, or runtime `rules` field | Copy to `rules.toml` for archive inputs |
+| [examples/rules.files.example.toml](../examples/rules.files.example.toml) | Sorting ordinary files while preserving filenames | Same rules options, with file-mode ingest | Copy to `rules.toml` for `--input-mode files` |
 
 Runtime settings and sorting rules are separate schemas. Pass runtime files with
 `--config`, and rules files with `--rules` or the runtime `rules` field. Unknown
@@ -72,7 +72,7 @@ folder beneath `staging_dir/payloads`, empty by default. Filename collisions fai
 before payload writes; choose an ID template to disambiguate. `order_by = "source"`
 is the default, with optional `"name"` affecting execution only. Policies use
 `name_contains` and include/exclude actions. Old acquisition inventories/receipts
-are rejected; explicitly start a fresh root with `bfs collect URL -o collection-new`.
+are rejected; explicitly start a fresh root with `bfsort collect URL -o collection-new`.
 
 ## Sizes, rates and extraction limits
 
@@ -114,6 +114,8 @@ and page defaults, ordering, speed, request caps and retention behavior.
 | `organization.default_filename` | Fallback filename template, default `{sha256}.sample` |
 | Rule `name` | Human-readable label |
 | `rules.match.file_type` | Detected content type, such as `pdf`, `pe`, `elf` |
+| `rules.match.detected_format` | Precise typed identifier such as `docx`, `png`, `python` |
+| `rules.match.mismatch_status` | Typed status such as `mismatch`, `compatible`, `ambiguous` |
 | `rules.match.original_extension` | Case-insensitive original extension, without a dot |
 | `rules.match.encrypted` | Whether the input ZIP entry was encrypted |
 | `rules.match.duplicate` | Whether the payload content has duplicate occurrences |
@@ -122,7 +124,11 @@ and page defaults, ordering, speed, request caps and retention behavior.
 
 Matchers in one rule must all match. Template fields include `file_type`,
 `original_extension`, `original_name`, `original_stem`, `sha256`, `size`,
-`encrypted`, `duplicate`, `source_archive`, `ingest_date`, and `occurrence_id`.
+`encrypted`, `duplicate`, `source_archive`, `ingest_date`, `occurrence_id`,
+`detected_format`, `detected_family`, and `mismatch_status`.
+See [detection](detection.md) for identifiers, confidence, legacy defaults and
+metadata schemas. `examples/rules.formats.example.toml` and `examples/rules.extensions.example.toml`
+provide independent export layouts.
 Archive-derived records require `.sample` filenames. Paths are validated and
 collisions resolved by the existing planner.
 
@@ -131,7 +137,7 @@ collisions resolved by the existing planner.
 All commands support built-in operational defaults. Discovery still needs a URL;
 other commands need existing input data, an inventory or a repository. See the
 [default commands table](commands.md#defaults-without-configuration).
-Download presets in `collection.example.toml` intentionally impose limits; built-in
+Download presets in `examples/collection.example.toml` intentionally impose limits; built-in
 transfer defaults impose none. Pass a config to restore application byte/count caps.
 Timeouts, origin restrictions, sealing and extraction limits remain in force.
 Reorganize can omit `--rules` to use built-in policies rather than loading a file.
@@ -146,7 +152,7 @@ working-directory/
 │   └── downloads/
 │       ├── control/                # Download lock and completion receipts
 │       └── payloads/               # Sealed downloaded ZIPs in literal configured folders
-└── organized/                      # Default managed BFS repository
+└── organized/                      # Default managed bfsort repository
     ├── security.json
     ├── .lock
     ├── .staging/                   # Temporary ingest/view work
@@ -163,5 +169,5 @@ fallback for local inputs, not an intermediate download directory.
 
 The defaults were renamed from `downloads` and `repository`. Existing directories
 are never renamed or moved. Use explicit input/output paths, a runtime config,
-or `bfs stats ./repository` to continue working with an older layout. Explicit
+or `bfsort stats ./repository` to continue working with an older layout. Explicit
 settings take precedence; `collection/downloads` remains unchanged.

@@ -195,7 +195,7 @@ fn require_success(report: &RunReport, operation: &str) -> Result<()> {
     Ok(())
 }
 
-fn output_password(config: &Config) -> Result<Option<String>> {
+pub(crate) fn output_password(config: &Config) -> Result<Option<String>> {
     let mut passwords = security::passwords(config.output_password_file.as_deref())?;
     ensure!(
         config.output_password_file.is_none() || passwords.len() == 1,
@@ -411,8 +411,11 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                         )
                     };
                     match result {
-                        Ok(item) => {
+                        Ok(mut item) => {
                             let file_type = classifier::classify(&item.prefix).to_string();
+                            let detection =
+                                classifier::detect_reader(&item.prefix, item.file.as_file_mut());
+                            let mismatch = crate::mismatch::evaluate(&original, &detection);
                             repo.commit(item.file, &item.sha256, item.size)?;
                             let basename = original
                                 .rsplit(['/', '\\'])
@@ -441,6 +444,8 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                                 &item.sha256,
                             ))?);
                             let record = Occurrence {
+                                detection,
+                                mismatch,
                                 provenance: config.remote_inputs.get(path).cloned(),
                                 input_mode: config.input_mode,
                                 occurrence_id: id,

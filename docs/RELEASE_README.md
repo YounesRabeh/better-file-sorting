@@ -1,23 +1,29 @@
-# bfs
+# bfsort
 
 [< Back to bfs](../README.md) • [Documentation Hub](README.md)
 
-`bfs` ingests ZIP archives into content-addressed storage without executing or opening extracted payloads. It records provenance and builds metadata-driven views with runtime TOML rules.
+`bfsort` ingests ZIP archives into content-addressed storage without executing or opening extracted payloads. It records provenance and builds metadata-driven views with runtime TOML rules.
 
 The default `sealed` mode stores payloads with owner-only access removed (`0000`) after streaming validation. This is a permission policy, not a sandbox; use a dedicated unprivileged account and an isolated VM or container for malware handling.
 
-Typical commands:
+Common workflows:
 
-```text
-bfs inspect ./incoming
-bfs ingest ./incoming --output ./organized --rules ./rules.toml
-bfs stats ./organized
-bfs reorganize ./organized --rules ./rules.toml
+```sh
+bfsort organize ./incoming --output ./organized
+bfsort ingest ./incoming --extract --output ./organized
+bfsort stats ./organized
+bfsort report mismatches ./organized --format csv --output mismatches.csv
+bfsort reorganize ./organized --rules ./examples/rules.example.toml
 ```
 
-See the repository README and `config.example.toml` for limits, passwords, and security modes. Releases and CI support Linux only; no Windows or macOS executables are distributed.
+Use `--extract` explicitly to ingest ZIP contents. Ordinary files are sorted by
+default. Content detection and mismatch reports use stored metadata; a mismatch
+is not a malware verdict.
 
-BFS 0.4.0 adds direct HTTP ZIP discovery, policy-controlled sealed staging, shared
-speed/request limits and receipt-verified ingest. See `collection.example.toml`
-and the acquisition command reference. Local HTTP fixture tests generate/serve
-ZIP payloads without depending on public sites.
+For independent ZIP exports, ingest with `--security-mode standard`, then use
+`bfsort export` with a sorting policy. Sealed repositories support metadata reports
+and export previews without unlocking payloads.
+
+See the [command reference](commands.md), [configuration guide](configuration.md)
+and [detection and export guide](detection.md) for options and examples.
+Releases support Linux only.

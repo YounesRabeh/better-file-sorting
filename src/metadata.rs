@@ -19,6 +19,10 @@ use std::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Occurrence {
+    #[serde(default)]
+    pub detection: crate::classifier::Detection,
+    #[serde(default)]
+    pub mismatch: crate::mismatch::Evaluation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Optional remote source context; absent in legacy and local records.
     pub provenance: Option<crate::acquisition::Candidate>,
@@ -113,6 +117,35 @@ pub fn load(root: &Path) -> Result<Vec<Occurrence>> {
             }
         }
     }
+    let analysis = root.join("reports/classification.jsonl");
+    crate::discovery::check_path(&analysis)?;
+    if analysis.try_exists()? {
+        security::validate_file(&analysis, SecurityMode::Standard)?;
+        let mut reader = BufReader::new(fs::File::open(&analysis)?);
+        loop {
+            let mut line = Vec::new();
+            let count =
+                std::io::Read::take(&mut reader, 1024 * 1024 + 1).read_until(b'\n', &mut line)?;
+            if count == 0 {
+                break;
+            }
+            ensure!(
+                count <= 1024 * 1024 && line.ends_with(b"\n"),
+                "invalid analysis record"
+            );
+            let updated: Occurrence = serde_json::from_slice(&line)?;
+            updated.validate()?;
+            let original = records
+                .get_mut(&updated.occurrence_id)
+                .ok_or_else(|| anyhow::anyhow!("analysis references unknown occurrence"))?;
+            ensure!(
+                original.sha256 == updated.sha256 && original.size == updated.size,
+                "analysis identity mismatch"
+            );
+            original.detection = updated.detection;
+            original.mismatch = updated.mismatch;
+        }
+    }
     let mut result: Vec<Occurrence> = records.into_values().collect();
     result.sort_by(|a, b| {
         (&a.source_path, a.entry_index, &a.occurrence_id).cmp(&(
@@ -122,4 +155,56 @@ pub fn load(root: &Path) -> Result<Vec<Occurrence>> {
         ))
     });
     Ok(result)
+}
+
+/// Explicitly refresh detection metadata without changing payloads or original journals.
+pub fn analyze(
+    repo: &crate::storage::Repository,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<usize> {
+    use std::io::Read;
+    use std::sync::atomic::Ordering;
+    ensure!(
+        repo.mode() == SecurityMode::Standard,
+        "analysis requires a standard repository; sealed payloads are never unlocked automatically"
+    );
+    let mut records = load(repo.root())?;
+    let mut cache = BTreeMap::new();
+    for record in &mut records {
+        ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
+        if !cache.contains_key(&record.sha256) {
+            let path = repo.object(&record.sha256)?;
+            security::validate_file(&path, SecurityMode::Standard)?;
+            let mut file = fs::File::open(path)?;
+            ensure!(
+                file.metadata()?.len() == record.size,
+                "manifest/object size mismatch"
+            );
+            let mut prefix = Vec::with_capacity(crate::classifier::PREFIX_LIMIT);
+            Read::take(&mut file, crate::classifier::PREFIX_LIMIT as u64)
+                .read_to_end(&mut prefix)?;
+            cache.insert(
+                record.sha256.clone(),
+                crate::classifier::detect_reader(&prefix, &mut file),
+            );
+        }
+        record.detection = cache[&record.sha256].clone();
+        record.mismatch = crate::mismatch::evaluate(&record.original_entry_name, &record.detection);
+    }
+    let directory = repo.root().join("reports");
+    let target = directory.join("classification.jsonl");
+    crate::discovery::check_path(&target)?;
+    if target.try_exists()? {
+        security::validate_file(&target, SecurityMode::Standard)?;
+    }
+    let mut file = tempfile::NamedTempFile::new_in(&directory)?;
+    for record in &records {
+        serde_json::to_writer(&mut file, record)?;
+        file.write_all(b"\n")?;
+    }
+    file.as_file().sync_all()?;
+    ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
+    file.persist(target)?;
+    fs::File::open(directory)?.sync_all()?;
+    Ok(records.len())
 }

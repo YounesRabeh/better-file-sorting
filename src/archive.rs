@@ -239,3 +239,25 @@ pub fn publish(
     File::open(parent)?.sync_all()?;
     Ok(())
 }
+
+/// Export without discovery, extraction, hashing, detection, or view mutation.
+pub fn export_repository(
+    repo: &crate::storage::Repository,
+    rules: &crate::rules::Rules,
+    config: &crate::config::Config,
+    dry_run: bool,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<ZipExport>> {
+    let records = crate::metadata::load(repo.root())?;
+    let plan = rules.plan(&records)?;
+    let exports = plan_exports(&plan, config)?;
+    if !dry_run {
+        ensure!(
+            repo.mode() == crate::config::SecurityMode::Standard,
+            "export requires a standard repository; sealed payloads are never unlocked automatically"
+        );
+        let password = crate::pipeline::output_password(config)?;
+        publish_exports(repo, &exports, config, password.as_deref(), cancelled)?;
+    }
+    Ok(exports)
+}

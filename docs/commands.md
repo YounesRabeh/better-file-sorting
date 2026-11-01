@@ -2,8 +2,8 @@
 
 [Documentation hub](README.md) · [Configuration guide](configuration.md) · [Project README](../README.md)
 
-Examples use `bfs` on your `PATH`. After a local build, use
-`target/release/bfs` instead. Put command options after the command name.
+Examples use `bfsort` on your `PATH`. After a local build, use
+`target/release/bfsort` instead. Put command options after the command name.
 
 ## Global presentation and configuration
 
@@ -26,7 +26,7 @@ reused, including offline dry-run selection. Normal collect saves missing/refres
 inventory and downloads only; it never ingests or unseals.
 
 Inventories/receipts from previous releases are unsupported. To start explicitly
-fresh without deleting old data: `bfs collect URL -o ./collection-new`. There is
+fresh without deleting old data: `bfsort collect URL -o ./collection-new`. There is
 no migration. Download filename templates are exactly `{original_name}` (default),
 `{name}-{source_id}`, `{source_id}`. `[download].directory` is a literal subfolder.
 Unsafe basenames are sanitized and duplicate destinations fail before writes.
@@ -39,20 +39,20 @@ Remote page order may change. Internal inventory retains URLs/IDs; it has no
 
 | Command | What it does | Example |
 | --- | --- | --- |
-| `collect [URL] [-c FILE] [-o ROOT] [-j N]` | Discover when inventory is absent, then select and download. `--refresh` forces discovery. | `bfs collect -c collection.toml` |
-| `organize [INPUTS]... [-o PATH] [--extract]` | Same engine and options as ingest; ordinary files by default. | `bfs organize ./incoming -o ./organized` |
-| `config validate [-c FILE]` | Validate TOML and security/limit settings without processing inputs. | `bfs config validate` |
-| `discover [URL] [--config <FILE>]` | Scan one HTML page and save ordered ZIP links; no resource bodies downloaded. | `bfs discover --config collection.toml` |
-| `download [--config <FILE>]` | Apply policies and transfer ZIPs into sealed staging. | `bfs download --config collection.toml` |
-| `download [--config <FILE>] --dry-run` | Offline candidate selection preview; no requests or downloads. | `bfs download --config collection.toml --dry-run` |
-| `ingest [INPUTS]...` | Sort ordinary files, including ZIPs unchanged; use --extract for contents. | `bfs ingest ./incoming --output ./organized --rules ./rules.toml` |
-| `ingest --input-mode files [INPUTS]...` | Sort ordinary files and folders using the same policies. ZIP files are sorted as files, without extracting them. | `bfs ingest ./documents --input-mode files --output ./organized --rules ./rules.toml` |
-| `ingest --zip [INPUTS]...` | Sort inputs and publish only a compressed ZIP, without keeping a repository. Works with either input mode. | `bfs ingest ./documents --input-mode files --zip --output ./sorted.zip --rules ./rules.toml` |
-| `inspect [INPUTS]...` | Print ZIP entry metadata (use --json for machine output) without extracting payloads. Folders are searched for ZIP archives. | `bfs inspect ./incoming --recursive false --json` |
-| `stats [REPOSITORY]` | Print repository counts, duplicates, categories and storage usage (use --json for machine output) without reading payload contents. | `bfs stats ./organized --json` |
-| `reorganize [REPOSITORY] [--rules <FILE>]` | Build a new view from stored metadata using new rules, without unlocking payloads. Previous views are retained. | `bfs reorganize ./organized --rules ./rules.toml` |
-| `help [COMMAND]` | Show general help or help for a command; `--help` / `-h` also works. | `bfs help ingest` |
-| `--version` / `-V` | Print the installed version. | `bfs --version` |
+| `collect [URL] [-c FILE] [-o ROOT] [-j N]` | Discover when inventory is absent, then select and download. `--refresh` forces discovery. | `bfsort collect -c collection.toml` |
+| `organize [INPUTS]... [-o PATH] [--extract]` | Same engine and options as ingest; ordinary files by default. | `bfsort organize ./incoming -o ./organized` |
+| `config validate [-c FILE]` | Validate TOML and security/limit settings without processing inputs. | `bfsort config validate` |
+| `discover [URL] [--config <FILE>]` | Scan one HTML page and save ordered ZIP links; no resource bodies downloaded. | `bfsort discover --config collection.toml` |
+| `download [--config <FILE>]` | Apply policies and transfer ZIPs into sealed staging. | `bfsort download --config collection.toml` |
+| `download [--config <FILE>] --dry-run` | Offline candidate selection preview; no requests or downloads. | `bfsort download --config collection.toml --dry-run` |
+| `ingest [INPUTS]...` | Sort ordinary files, including ZIPs unchanged; use --extract for contents. | `bfsort ingest ./incoming --output ./organized --rules ./rules.toml` |
+| `ingest --input-mode files [INPUTS]...` | Sort ordinary files and folders using the same policies. ZIP files are sorted as files, without extracting them. | `bfsort ingest ./documents --input-mode files --output ./organized --rules ./rules.toml` |
+| `ingest --zip [INPUTS]...` | Sort inputs and publish only a compressed ZIP, without keeping a repository. Works with either input mode. | `bfsort ingest ./documents --input-mode files --zip --output ./sorted.zip --rules ./rules.toml` |
+| `inspect [INPUTS]...` | Print ZIP entry metadata (use --json for machine output) without extracting payloads. Folders are searched for ZIP archives. | `bfsort inspect ./incoming --recursive false --json` |
+| `stats [REPOSITORY]` | Print repository counts, duplicates, categories and storage usage (use --json for machine output) without reading payload contents. | `bfsort stats ./organized --json` |
+| `reorganize [REPOSITORY] [--rules <FILE>]` | Build a new view from stored metadata using new rules, without unlocking payloads. Previous views are retained. | `bfsort reorganize ./organized --rules ./rules.toml` |
+| `help [COMMAND]` | Show general help or help for a command; `--help` / `-h` also works. | `bfsort help ingest` |
+| `--version` / `-V` | Print the installed version. | `bfsort --version` |
 
 ## Discovery and download options
 
@@ -73,13 +73,13 @@ TOML settings; `collect -j` overrides concurrency and `collect -o ROOT` selects 
 
 | Command | Default behavior |
 | --- | --- |
-| `bfs discover URL` | Scans the supplied page and writes `./collection/inventory.jsonl`; no built-in website |
-| `bfs download` | Reads that inventory and downloads to `./collection/downloads`; 3 workers, no delay, no speed/request/count/size caps |
-| `bfs download --dry-run` | Offline selection from the default inventory |
-| `bfs ingest` | Uses completed download receipts when the default control directory exists; otherwise reads `./incoming`; writes sealed `./organized` |
-| `bfs inspect` | Inspects ZIPs in `./incoming` without extracting them |
-| `bfs stats` | Summarizes `./organized` |
-| `bfs reorganize` | Adds a new default-policy view to `./organized`; use `--rules` to change policy and `--dry-run` to preview |
+| `bfsort discover URL` | Scans the supplied page and writes `./collection/inventory.jsonl`; no built-in website |
+| `bfsort download` | Reads that inventory and downloads to `./collection/downloads`; 3 workers, no delay, no speed/request/count/size caps |
+| `bfsort download --dry-run` | Offline selection from the default inventory |
+| `bfsort ingest` | Uses completed download receipts when the default control directory exists; otherwise reads `./incoming`; writes sealed `./organized` |
+| `bfsort inspect` | Inspects ZIPs in `./incoming` without extracting them |
+| `bfsort stats` | Summarizes `./organized` |
+| `bfsort reorganize` | Adds a new default-policy view to `./organized`; use `--rules` to change policy and `--dry-run` to preview |
 
 Explicit paths and configured inputs win. Custom download paths require the same
 configuration for ingest. Downloaded files still require explicit unlocking before
@@ -92,12 +92,12 @@ and extraction limits remain active. No automatic retries or partial-file resume
 
 | Goal | Commands / next step |
 | --- | --- |
-| Download a web collection | `bfs discover --config collection.toml`, then `bfs download --config collection.toml` |
-| Sort downloaded contents | Explicitly unlock all receipt-owned ZIPs to `0600`, then `bfs ingest --config collection.toml` |
+| Download a web collection | `bfsort discover --config collection.toml`, then `bfsort download --config collection.toml` |
+| Sort downloaded contents | Explicitly unlock all receipt-owned ZIPs to `0600`, then `bfsort ingest --config collection.toml` |
 | Preview before writing | Download: `--dry-run` selects candidates offline. Ingest: `--dry-run` reads payloads and plans final destinations. |
-| Sort local files | `bfs ingest ./documents --input-mode files --rules rules.files.example.toml --output organized` |
-| Read ZIP metadata only | `bfs inspect ./incoming` |
-| Change an existing repository layout | `bfs reorganize ./organized --rules rules.toml --dry-run`, then omit `--dry-run` |
+| Sort local files | `bfsort ingest ./documents --input-mode files --rules examples/rules.files.example.toml --output organized` |
+| Read ZIP metadata only | `bfsort inspect ./incoming` |
+| Change an existing repository layout | `bfsort reorganize ./organized --rules rules.toml --dry-run`, then omit `--dry-run` |
 
 ## Ingest options
 
@@ -107,7 +107,7 @@ and extraction limits remain active. No automatic retries or partial-file resume
 | `--config <FILE>` | Load runtime settings from TOML. Explicit CLI settings override file settings. | Built-in settings when omitted. |
 | `--input-mode <MODE>` | Choose archive extraction or ordinary-file sorting. | `files` (default), `archives`; `--extract` selects archives. |
 | `--output <PATH>` | Repository directory, or destination ZIP path when ZIP output is enabled. | `organized`; use an explicit ZIP filename with `--zip`. |
-| `--rules <FILE>` | Load the central sorting policy: filename policy, ordered matchers, templates and duplicate handling. | Built-in rules: first occurrence per content hash, grouped by file type, named `{sha256}.sample`. Use `rules.files.example.toml` to retain ordinary filenames. |
+| `--rules <FILE>` | Load the central sorting policy: filename policy, ordered matchers, templates and duplicate handling. | Built-in rules: first occurrence per content hash, grouped by file type, named `{sha256}.sample`. Use `examples/rules.files.example.toml` to retain ordinary filenames. |
 | `--zip` | Enable ZIP-only output. Refuses existing destinations and failed or interrupted runs. | Disabled. Can also be enabled with `zip = true` in config. |
 | `--zip-dir <DIRECTORY>` | Select a sorted relative directory including descendants; repeat to select several. Enables ZIP output automatically. Selections are exact and case-sensitive. | All sorted entries when omitted. CLI selections replace configured `zip_dirs`. |
 | `--zip-each-dir` | Create one ZIP per selected directory; without selections, one per top-level sorted directory. Enables ZIP output; `--output` becomes a new directory. | Disabled. Config: `zip_each_dir = true`. |
@@ -137,15 +137,15 @@ and extraction limits remain active. No automatic retries or partial-file resume
 
 ```sh
 # One ZIP containing only these sorted directories.
-bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml \
+bfsort ingest ./documents --input-mode files --rules ./examples/rules.files.example.toml \
   --zip-dir documents/pdf --zip-dir text --output ./selected.zip
 
 # Separate ZIPs for every top-level sorted directory.
-bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml \
+bfsort ingest ./documents --input-mode files --rules ./examples/rules.files.example.toml \
   --zip-each-dir --output ./exports
 
 # Separate ZIPs only for selected directories.
-bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml \
+bfsort ingest ./documents --input-mode files --rules ./examples/rules.files.example.toml \
   --zip-dir documents/pdf --zip-dir text --zip-each-dir --output ./exports
 ```
 
@@ -173,7 +173,7 @@ permanent repository is retained.
 Create a local password file with `0600` permissions, then run:
 
 ```sh
-bfs ingest ./documents --input-mode files --rules ./rules.files.example.toml \
+bfsort ingest ./documents --input-mode files --rules ./examples/rules.files.example.toml \
   --zip --output ./private.zip --output-password-file ./output-password.txt
 ```
 
@@ -181,10 +181,10 @@ Sources and password files remain untouched. Password files and their hard links
 are excluded from discovered inputs. ZIP filenames remain visible even when
 contents are encrypted; extraction requires an AES-compatible reader.
 
-Policies are configured in [rules.example.toml](../rules.example.toml); runtime
-settings and size/count limits are in [config.example.toml](../config.example.toml).
+Policies are configured in [examples/rules.example.toml](../examples/rules.example.toml); runtime
+settings and size/count limits are in [examples/config.example.toml](../examples/config.example.toml).
 The default `organization.filename_policy = "samples"` requires `.sample`
-filenames. For regular files, use [rules.files.example.toml](../rules.files.example.toml):
+filenames. For regular files, use [examples/rules.files.example.toml](../examples/rules.files.example.toml):
 `filename_policy = "regular"` with `default_filename = "{original_name}"`.
 Names are sanitized and collision identifiers preserve extensions. Archive
 inputs and archive-derived records refuse the regular policy, including legacy
@@ -223,25 +223,25 @@ See the [ZIP usage notes](../README.md#sort-regular-folders-and-zip-the-result).
 
 ## Acquisition commands
 
-`bfs discover URL` uses built-in defaults and writes `./collection/inventory.jsonl`.
+`bfsort discover URL` uses built-in defaults and writes `./collection/inventory.jsonl`.
 Add `--config FILE` for custom limits or paths; an explicit URL overrides `source.page`.
-`bfs download` needs no config: it reads the default inventory and infers the
+`bfsort download` needs no config: it reads the default inventory and infers the
 source origin from its first candidate. Use the same config for discovery and
 download when enabling cross-origin links or custom paths.
 
-`bfs discover --config FILE` scans one HTML page, resolves direct `.zip` links,
+`bfsort discover --config FILE` scans one HTML page, resolves direct `.zip` links,
 deduplicates fragment-free URLs, and atomically saves a versioned inventory.
 The inventory filename may end in `.jsonl` for compatibility with the example,
 but its content is one versioned JSON object, not an append-only JSONL stream.
 No payload is downloaded. Page failures preserve the previous inventory.
 
-`bfs download --config FILE --dry-run` reads the inventory without HTTP requests
-or staging writes and prints selected candidates. `bfs download --config FILE`
+`bfsort download --config FILE --dry-run` reads the inventory without HTTP requests
+or staging writes and prints selected candidates. `bfsort download --config FILE`
 applies policies, downloads files and writes completion receipts. Reports contain
 candidate source IDs and errors; local placement is also saved in receipts under
 `staging_dir/control`. Payloads live under `staging_dir/payloads`.
 
-`bfs ingest --config FILE` without explicit inputs loads all completed receipts,
+`bfsort ingest --config FILE` without explicit inputs loads all completed receipts,
 requires explicit unlocking to 0600, verifies hashes, then uses existing ingest.
 It never ingests inventory/control files or partial transfers. Use `--dry-run` for
 the existing full ingest preview. Unreceipted partials are ignored and count toward
@@ -312,3 +312,26 @@ and `"1 GiB"`. MB/GB use decimal units; MiB/GiB use binary units.
 Rule matchers `min_size` and `max_size` also accept readable sizes or integer
 bytes (for example `max_size = "64 KiB"` or `max_size = 65536`). Numeric zero
 remains valid for rule bounds. Reports and stored metadata retain numeric bytes.
+
+## Detection reports and repository exports
+
+```sh
+bfsort report mismatches ./organized --format table
+bfsort report mismatches ./organized --format json --all
+bfsort report mismatches ./organized --format jsonl --status mismatch,ambiguous
+bfsort report mismatches ./organized --format csv -o mismatches.csv --min-confidence high
+bfsort analyze ./standard-repository
+bfsort export ./standard-repository --rules examples/rules.formats.example.toml --zip-each-dir -o ./by-format
+bfsort export ./standard-repository --rules examples/rules.extensions.example.toml --zip-each-dir -o ./by-extension
+bfsort export ./organized -o ./preview.zip --dry-run
+```
+
+`report` reads stored metadata only; defaults show definitive mismatches.
+`--all`, `--status` and `--min-confidence` control rows. JSON has `counts` and
+`rows`; JSONL/CSV contain rows only. Output paths never overwrite existing files.
+`analyze` explicitly refreshes classification into a sidecar, using stored objects.
+`export` uses rules and persisted metadata without extraction, hashing or detection.
+It preserves existing views; `--zip-dir`, `--output-password-file` and `--dry-run`
+are supported. Analysis and actual payload exports require standard repositories;
+sealed repositories permit reports and export previews. See the
+[detection guide](detection.md) for bounds, schemas, statuses and compatibility.

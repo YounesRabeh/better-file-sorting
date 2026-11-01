@@ -96,6 +96,7 @@ fn main() -> anyhow::Result<()> {
                     .path()
                     .join(format!("repo-{scenario}-{mode:?}-{workers}"));
                 let mut config = Config {
+                    input_mode: bfs::config::InputMode::Archives,
                     inputs: vec![input.clone()],
                     output: output.clone(),
                     workers,

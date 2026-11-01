@@ -1,0 +1,4 @@
+{"detector":"legacy_prefix","files_per_second":5320115.612496398,"labelled_total":6,"requested_identifiers_matched":3,"seconds":0.112779504}
+{"detector":"enhanced_prefix","files_per_second":7800198.335643081,"labelled_total":6,"requested_identifiers_matched":6,"seconds":0.076921121}
+{"detector":"zip_directory","files_per_second":2355445.9854426375,"seconds":0.042455753}
+{"definitive_mismatches":1,"detection_struct_bytes":104,"false_mismatches":0,"mismatch_decisions_correct":5,"mismatch_decisions_total":5}

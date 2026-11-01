@@ -48,29 +48,29 @@ jobs:
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
           cargo nextest run --workspace --lib --bins --tests --locked
-          cargo build --release --locked -p bfs --bin bfs
-          target/release/bfs --version
+          cargo build --release --locked -p bfs --bin bfsort
+          target/release/bfsort --version
 
       - name: Package executable and checksums
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           host="$(rustc -vV | sed -n 's/^host: //p')"
-          package="bfs-$RELEASE_TAG-$host"
+          package="bfsort-$RELEASE_TAG-$host"
           mkdir -p "release-package/$package" release-assets
-          install -m 755 target/release/bfs "release-package/$package/bfs"
+          install -m 755 target/release/bfsort "release-package/$package/bfsort"
           cp LICENSE "release-package/$package/"
           cp docs/RELEASE_README.md "release-package/$package/README.md"
           tar -czf "release-assets/$package.tar.gz" -C release-package "$package"
-          install -m 755 target/release/bfs release-assets/bfs
+          install -m 755 target/release/bfsort release-assets/bfsort
           cd release-assets
-          sha256sum bfs *.tar.gz > SHA256SUMS
+          sha256sum bfsort *.tar.gz > SHA256SUMS
           sha256sum --check SHA256SUMS
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: bfs-${{ github.sha }}
+          name: bfsort-${{ github.sha }}
           path: release-assets/*
           if-no-files-found: error
           retention-days: 14
@@ -84,7 +84,7 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
-          name: bfs-${{ github.sha }}
+          name: bfsort-${{ github.sha }}
           path: release-assets
 
       - name: Verify downloaded checksums
@@ -100,5 +100,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --draft \
-            --title "bfs $RELEASE_TAG" \
+            --title "bfsort $RELEASE_TAG" \
+            --notes "## Highlights" \
             --generate-notes
