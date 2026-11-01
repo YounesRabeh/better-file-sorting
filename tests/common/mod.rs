@@ -29,9 +29,9 @@ pub fn run(args: &[&std::ffi::OsStr]) -> Output {
         .args(args)
         .args(
             if args.first().is_some_and(|a| *a == "ingest")
-                && !args
-                    .iter()
-                    .any(|a| *a == "--input-mode" || *a == "--config")
+                && !args.iter().any(|a| {
+                    *a == "--input-mode" || *a == "--config" || *a == "-c" || *a == "--extract"
+                })
             {
                 vec![std::ffi::OsStr::new("--extract")]
             } else {

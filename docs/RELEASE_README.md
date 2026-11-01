@@ -1,29 +1,25 @@
 # bfsort
 
-[< Back to bfs](../README.md) • [Documentation Hub](README.md)
+[Documentation](https://github.com/YounesRabeh/better-file-sorting/blob/main/docs/README.md) · [Commands](https://github.com/YounesRabeh/better-file-sorting/blob/main/docs/commands.md)
 
-`bfsort` ingests ZIP archives into content-addressed storage without executing or opening extracted payloads. It records provenance and builds metadata-driven views with runtime TOML rules.
-
-The default `sealed` mode stores payloads with owner-only access removed (`0000`) after streaming validation. This is a permission policy, not a sandbox; use a dedicated unprivileged account and an isolated VM or container for malware handling.
-
-Common workflows:
+Sort local files and ZIP collections with detected-format, original-extension
+or mismatch-status presets. Ingest once, retain provenance, then export multiple
+independent ZIP collections with portable metadata.
 
 ```sh
-bfsort organize ./incoming --output ./organized
-bfsort ingest ./incoming --extract --output ./organized
-bfsort stats ./organized
-bfsort report mismatches ./organized --format csv --output mismatches.csv
-bfsort reorganize ./organized --rules ./examples/rules.example.toml
+bfsort ingest ./incoming --extract --security-mode standard -o ./repository --resume
+bfsort stats ./repository
+bfsort export ./repository --preset by-format --zip-each-dir -o ./exports/by-format --resume
 ```
 
-Use `--extract` explicitly to ingest ZIP contents. Ordinary files are sorted by
-default. Content detection and mismatch reports use stored metadata; a mismatch
-is not a malware verdict.
+`collect` downloads sealed archives; it does not ingest them. Downloads require
+explicit authorized access before ingestion. Repository security defaults to
+sealed (`0000`); select standard (`0600`) before ingestion to permit exports.
+Permissions are not a sandbox. Existing modes never change automatically.
 
-For independent ZIP exports, ingest with `--security-mode standard`, then use
-`bfsort export` with a sorting policy. Sealed repositories support metadata reports
-and export previews without unlocking payloads.
+Omitted budgets and deadlines are unlimited. Use an explicitly bounded config
+when resource caps are required. Resume verifies completed work; it does not mean
+byte-level extraction continuation. Merge and split are not implemented.
 
-See the [command reference](commands.md), [configuration guide](configuration.md)
-and [detection and export guide](detection.md) for options and examples.
-Releases support Linux only.
+Linux is the supported runtime platform. See [configuration](https://github.com/YounesRabeh/better-file-sorting/blob/main/docs/configuration.md),
+[portable exports](https://github.com/YounesRabeh/better-file-sorting/blob/main/docs/exports.md) and [recovery](https://github.com/YounesRabeh/better-file-sorting/blob/main/docs/recovery.md) for details.

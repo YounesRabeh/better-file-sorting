@@ -6,10 +6,12 @@
 //! Keep harness work isolated from user payloads and production repositories.
 
 use bfs::{
-    config::{Config, Security, SecurityMode},
-    metadata, organizer, pipeline,
-    rules::Rules,
-    storage::Repository,
+    app::config::{Config, Security, SecurityMode},
+    ingest::pipeline,
+    organization::organizer,
+    organization::rules::Rules,
+    repository::metadata,
+    repository::storage::Repository,
 };
 use std::{fs::File, io::Write, sync::atomic::AtomicBool, time::Instant};
 /// Run the end-to-end ingestion and organization benchmark matrix.
@@ -96,7 +98,7 @@ fn main() -> anyhow::Result<()> {
                     .path()
                     .join(format!("repo-{scenario}-{mode:?}-{workers}"));
                 let mut config = Config {
-                    input_mode: bfs::config::InputMode::Archives,
+                    input_mode: bfs::app::config::InputMode::Archives,
                     inputs: vec![input.clone()],
                     output: output.clone(),
                     workers,
@@ -106,7 +108,7 @@ fn main() -> anyhow::Result<()> {
                     },
                     ..Config::default()
                 };
-                config.limits.max_expansion_ratio = 10_000;
+                config.limits.max_expansion_ratio = Some(10_000);
                 let start = Instant::now();
                 let report = pipeline::ingest(&config, &AtomicBool::new(false))?;
                 assert_eq!(report.accepted, archives * entries);
@@ -129,6 +131,24 @@ fn main() -> anyhow::Result<()> {
                     serde_json::json!({ "scenario": scenario, "archives": archives, "entries": report.accepted, "workers": workers, "mode": mode, "seconds": seconds, "files_per_second": report.accepted as f64 / seconds, "mib_per_second": (report.accepted * bytes) as f64 / 1048576.0 / seconds, "metadata_load_seconds": load_seconds, "reorganize_seconds": reorganize_start.elapsed().as_secs_f64(), "stored_bytes": report.summary.stored_bytes, "allocated_bytes": report.summary.allocated_bytes })
                 );
                 drop(repo);
+                config.resume = true;
+                let setup_start = Instant::now();
+                let setup = pipeline::ingest(&config, &AtomicBool::new(false))?;
+                assert_eq!(setup.accepted, archives * entries);
+                assert_eq!(setup.failures, 0);
+                let setup_seconds = setup_start.elapsed().as_secs_f64();
+                let resume_start = Instant::now();
+                let resumed = pipeline::ingest(&config, &AtomicBool::new(false))?;
+                assert_eq!(resumed.accepted, 0);
+                assert_eq!(resumed.skipped_files, archives);
+                assert_eq!(resumed.reused_occurrences, archives * entries);
+                assert_eq!(resumed.failures, 0);
+                println!(
+                    "{}",
+                    serde_json::json!({"scenario": scenario, "mode": mode, "workers": workers,
+                    "resume_setup_seconds": setup_seconds, "resume_verify_seconds": resume_start.elapsed().as_secs_f64(),
+                    "skipped_files": resumed.skipped_files, "reused_occurrences": resumed.reused_occurrences})
+                );
                 std::fs::remove_dir_all(output)?;
             }
         }

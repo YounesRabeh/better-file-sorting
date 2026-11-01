@@ -1,4 +1,4 @@
-# The limits below are an opt-in bounded preset; bare bfsort download has no byte/count caps.
+# Omitted budgets/deadlines are unlimited. See examples/bounded.toml for finite caps.
 # WEB COLLECTION — discover ZIP links, download sealed payloads, then ingest.
 # Usage: bfsort collect -c collection.toml
 # --dry-run may request HTML metadata, but never downloads payloads.
@@ -10,13 +10,14 @@
 # Use archives to extract ZIP entries, or files to sort ordinary files (including ZIPs unchanged).
 input_mode = "archives"
 # Destination repository, ZIP file, or new directory for separate ZIP exports.
-output = "./sorted.zip"
+output = "./organized"
 # Export a ZIP instead of a repository; output must name a new ZIP file.
-zip = true
+# zip = true
 # Path to the TOML policy defining matching, destination paths and duplicate handling.
-rules = "./examples/rules.example.toml"
+preset = "by-format"
+resume = true
 
-# Stage 1: page discovery
+# Page discovery
 [source]
 # HTTP(S) page to scan for direct ZIP links; credentials and query strings are unsupported.
 page = "https://example.org/downloads/"
@@ -24,32 +25,32 @@ page = "https://example.org/downloads/"
 same_origin = true
 # Sizes accept readable units or integer bytes.
 # Maximum downloaded HTML page body; accepts readable units or integer bytes.
-max_page_size = "10 MB"
+# max_page_size = "10 MB"
 
-# Stage 2: persistent downloads and shared transfer budgets
+# Persistent downloads and optional shared transfer budgets
 [download]
 # Path to the versioned discovery inventory (a JSON object despite the .jsonl suffix).
 inventory = "./collection/inventory.jsonl"
 # Private download root containing sealed payloads and completion receipts; files require explicit unlocking before ingest.
 staging_dir = "./collection/downloads"
 # Maximum uncached candidates attempted in one download invocation.
-max_files = 100
+# max_files = 100
 # Maximum downloaded bytes per resource, independent of extraction limits.
-max_file_size = "1 GB"
+# max_file_size = "1 GB"
 # Aggregate resource-body byte budget per invocation, including failed transfers.
-max_total_size = "10 GB"
+# max_total_size = "10 GB"
 # Maximum managed payload storage, including completed files and leftover partials.
-max_staging_size = "20 GB"
+# max_staging_size = "20 GB"
 # Number of parallel download workers sharing all speed, request and byte limits.
 concurrency = 3
 # Transfer timeout in seconds, including time spent waiting for pacing.
-timeout_seconds = 300
+# timeout_seconds = 300
 # Omit any of these optional caps for unrestricted speed/request count.
 # Aggregate download speed, e.g. 2 MB/s or 2 MiB/s; integer bytes/second also works; omit for no cap.
 # max_speed = "2 MB/s"
 # Minimum milliseconds between HTTP request starts across workers; zero disables spacing.
 # min_request_interval_ms = 1000
-# Maximum HTTP requests per command invocation, including redirects; omit for no cap.
+# Maximum HTTP requests per acquisition phase, including redirects; omit for no cap.
 # max_requests = 100
 # Preserve website order; use "name" only to change download execution priority.
 order_by = "source"

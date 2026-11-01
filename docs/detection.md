@@ -13,10 +13,10 @@ source provenance, SHA-256, size and identity. New `detection` metadata contains
 `status` and `reason`. Detection is performed before the staging handle is sealed
 and published, using the prefix captured during the existing hash/copy pass.
 
-`file_type` and `{file_type}` keep their previous eight-category classifier and
+`file_type` and `{file_type}` use the broad eight-category classifier and
 meaning. They are intentionally independent of the stricter detailed detector:
 for example an incomplete ELF prefix can retain legacy `file_type = "elf"` while
-its detailed format is `unknown`. Existing rules and manifests remain usable.
+its detailed format is `unknown`. Use `detected_format` for precise content grouping.
 Old records default to `not_evaluated` for detection and mismatch, never `match`.
 Older bfsort binaries do not accept the new fields; use this version for new manifests.
 
@@ -185,3 +185,13 @@ and `detected_format` / `mismatch_status` in `[rules.match]`. Existing `{file_ty
 and `{original_extension}` templates retain their meanings. Legacy records sort
 under `not_evaluated` until explicit analysis. Use `duplicates = "all"` when a
 view must preserve every distinct source occurrence and filename association.
+
+## Built-in presets and recovery
+
+`by-format` is the default grouping; `by-extension` uses original suffixes and
+`by-mismatch` uses filename/content agreement. Presets preserve every occurrence
+and are mutually exclusive with custom `--rules`. See [exports](exports.md) for
+the portable ZIP manifest and [recovery](recovery.md) for `--resume` verification.
+Omitted extraction budgets are unlimited; the detector bounds above remain
+mandatory technical limits. Use [bounded configuration](../examples/bounded.toml)
+to opt into resource budgets.

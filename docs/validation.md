@@ -89,3 +89,40 @@ cargo +nightly fuzz run untrusted_inputs -- -max_total_time=30 -max_len=65536
 
 Tests and short fuzz runs cannot establish complete parser correctness, universal
 classification accuracy or resilience to every filesystem failure.
+
+## Recovery and resource checks
+
+The regression suite covers complete-input reuse, changed input/settings,
+view-only changes, encrypted inputs, standard-object corruption, sealed access,
+partial archive retry and checkpoint schema rejection. Export tests cover the
+portable manifest, all presets, missing output recovery, changed plans, tampered
+ZIPs and the publication-before-receipt crash window, including both metadata
+indexes. Source/password files remain unchanged.
+
+Controlled fixtures exercise a streamed file larger than 256 MiB, a sparse ZIP
+larger than 1 GiB, more than 10,000 entries, and expansion beyond previous default
+budgets. Explicit caps still reject oversized work. Local HTTP fixtures cover
+optional deadlines and cancellation of a stalled body. Terminal checks cover
+independent stdout/stderr color detection, NO_COLOR, plain CSV errors and labels
+that do not style untrusted paths as status text.
+
+Raw quick benchmark comparisons:
+
+- [Before interface/recovery changes](benchmark-interface-before.jsonl)
+- [After interface/recovery changes](benchmark-interface-after.jsonl)
+- [Checkpoint setup and verified resume](benchmark-resume.jsonl)
+
+The comparison uses the same synthetic five-workload, five-worker-count,
+standard/sealed matrix. Each normal and resume matrix has 50 cases. Resume setup
+processes the input with checkpoints; verified resume must accept zero new
+occurrences and report all input files skipped. Input verification still reads
+archive bytes, and standard stored objects are hash-verified. Results are single
+shared-host runs, not statistical performance guarantees or large real-dataset
+accuracy measurements. Timings can vary in either direction with workload.
+
+AddressSanitizer smoke fuzzing exercises untrusted detection, names, metadata and
+report serialization. Leak detection is disabled for this environment. A short
+fuzz run does not establish exhaustive parser correctness. These checks do not
+prove power-loss durability, arbitrary OOM recovery or immediate OS socket closure.
+Discovery parses HTML in memory, and repository/checkpoint metadata grows with
+collection size; unlimited budgets do not imply constant memory usage.

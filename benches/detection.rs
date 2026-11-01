@@ -1,7 +1,7 @@
 //! Small labelled benign corpus; measurements are synthetic, not real-world accuracy.
 use bfs::{
-    classifier::{self, Confidence},
-    mismatch::{self, Status},
+    detection::classifier::{self, Confidence},
+    detection::mismatch::{self, Status},
 };
 use std::{
     hint::black_box,

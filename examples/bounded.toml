@@ -1,0 +1,22 @@
+# Opt in to application budgets: bfsort ingest -c examples/bounded.toml --extract INPUT
+input_mode = "archives"
+workers = 4
+
+[limits]
+max_entry_bytes = "256 MiB"
+max_archive_bytes = "1 GiB"
+max_input_bytes = "1 GiB"
+max_entries = 10000
+max_expansion_ratio = 1000
+
+[source]
+max_page_size = "5 MB"
+timeout_seconds = 300
+
+[download]
+max_files = 100
+max_file_size = "1 GiB"
+max_total_size = "10 GiB"
+max_staging_size = "20 GiB"
+timeout_seconds = 300
+max_requests = 200

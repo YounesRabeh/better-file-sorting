@@ -1,6 +1,6 @@
 # LOCAL INGEST — input paths, output, workers, security and extraction limits.
-# Usage: bfsort organize -c config.toml
-# Both organize and ingest default to files. Pass --extract to open ZIP contents.
+# Usage: bfsort ingest -c config.toml
+# Ingest defaults to ordinary files. Pass --extract to open ZIP contents.
 # Sorting rules belong in a separate file referenced by rules below.
 # Reference: docs/configuration.md; CLI overrides TOML.
 
@@ -25,6 +25,8 @@ output = "organized"
 recursive = true
 # Number of parallel ingest workers; valid range is 1 to 256.
 workers = 4
+preset = "by-format"
+# resume = true
 # Private 0600 file containing candidate input ZIP passwords, one per line.
 # password_file = "passwords.txt"
 # Path to the TOML policy defining matching, destination paths and duplicate handling.
@@ -39,16 +41,9 @@ restrict_directories = true
 # Must remain false; bfsort never automatically restores access to sealed payloads.
 allow_automatic_unsealing = false
 
-# Extraction limits (not download budgets)
-[limits]
-# Sizes accept readable units or integer bytes. MiB/GiB are binary; MB/GB are decimal.
-# Maximum expanded size of one ZIP entry or ordinary input file; readable units or integer bytes.
-max_entry_bytes = "256 MiB"
-# Maximum total expanded bytes per ZIP; also caps ordinary input file size.
-max_archive_bytes = "1 GiB"
-# Maximum compressed ZIP input size or ordinary file size; independent of expansion limits.
-max_input_bytes = "1 GiB"
-# Maximum entries per ZIP, or discovered input files in files mode.
-max_entries = 10000
-# Maximum permitted uncompressed-to-compressed size ratio for each ZIP entry.
-max_expansion_ratio = 1000
+# Optional extraction budgets are omitted: no application size/count/ratio caps.
+# Use examples/bounded.toml to opt into finite budgets.
+# [limits]
+# max_entry_bytes = "256 MiB"
+# max_archive_bytes = "1 GiB"
+# max_entries = 10000

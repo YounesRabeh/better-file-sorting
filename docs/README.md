@@ -1,6 +1,6 @@
 # Documentation Hub
 
-[< Back to bfs](../README.md)
+[< Back to bfsort](../README.md)
 
 Choose a reference by task:
 
@@ -10,6 +10,8 @@ Choose a reference by task:
 | Understand every command and option | [Command reference](commands.md) |
 | Understand reliability, security and performance | [Reliability guide](validation.md) |
 | Detect formats, report mismatches and export stored collections | [Detection and export guide](detection.md) |
+| Export by format, extension or mismatch | [Presets and portable exports](exports.md) |
+| Resume interrupted processing | [Recovery guide](recovery.md) |
 | Read the packaged release notes | [Release README](RELEASE_README.md) |
 | Inspect the benchmark output | [Benchmark results](benchmark-tmpfs.jsonl) |
 | Compare the partial disk benchmark | [Partial Btrfs benchmark](benchmark-btrfs-partial.jsonl) |
