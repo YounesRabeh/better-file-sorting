@@ -276,6 +276,15 @@ pub fn preview(config: &Config, cancelled: &AtomicBool) -> Result<Preview> {
     } else {
         None
     };
+    let removed = existing
+        .as_ref()
+        .map(|repo| crate::repository::cleanup::removed(repo.root()))
+        .transpose()?
+        .unwrap_or_default();
+    anyhow::ensure!(
+        !config.archive.nested_extraction || removed.is_empty(),
+        "nested extraction after logical removal requires a fresh repository"
+    );
     let mut records = existing
         .as_ref()
         .map(|repo| metadata::load(repo.root()))
@@ -297,6 +306,7 @@ pub fn preview(config: &Config, cancelled: &AtomicBool) -> Result<Preview> {
     staging.output_password_file = None;
     staging.security.mode = SecurityMode::Sealed;
     staging.resume = false;
+    staging.operation_args = None;
     let report = ingest_repository(&staging, cancelled, &rules)?;
     require_success(&report, "preview failed")?;
     records.extend(metadata::load(&staging.output)?);
@@ -304,7 +314,10 @@ pub fn preview(config: &Config, cancelled: &AtomicBool) -> Result<Preview> {
     for row in records {
         merged.entry(row.occurrence_id.clone()).or_insert(row);
     }
-    let records: Vec<_> = merged.into_values().collect();
+    let records: Vec<_> = merged
+        .into_values()
+        .filter(|r| !removed.contains(&r.occurrence_id))
+        .collect();
     let mut plan = rules.plan(&records)?;
     let archives = if config.zip_enabled() {
         archive::plan_exports(&plan, config, &rules)?
@@ -365,24 +378,41 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
     let repo = Repository::open(&config.output, config.security.mode)?;
     // Unchanged completed inputs already proved decryption; passwords affect retries only.
     // Never persist password contents or a dictionary-testable password digest.
+    anyhow::ensure!(
+        !config.archive.nested_extraction
+            || crate::repository::cleanup::removed(repo.root())?.is_empty(),
+        "nested extraction after logical removal requires a fresh repository"
+    );
+    let mut history = config
+        .operation_args
+        .as_ref()
+        .map(|args| crate::operations::Guard::start(repo.root(), "ingest", args))
+        .transpose()?;
+    if let Some(history) = &mut history
+        && let Ok(id) = std::env::var("BFSORT_RETRY_OF")
+    {
+        history.set_retry_of(&id)?;
+    }
     let checkpoints = config.resume;
     let checkpoint_dir = repo.root().join("operations/ingest");
     if checkpoints {
         security::private_dir(&repo.root().join("operations"))?;
         security::private_dir(&checkpoint_dir)?;
     }
+    let removed = crate::repository::cleanup::removed(repo.root())?;
     let existing: BTreeMap<_, _> = metadata::load(repo.root())?
         .into_iter()
         .map(|record| (record.occurrence_id.clone(), record))
         .collect();
     let fingerprint = metadata::digest(
         format!(
-            "ingest-checkpoint-v1/{}/{}/{:?}/{:?}/{:?}",
+            "ingest-checkpoint-v1/{}/{}/{:?}/{:?}/{:?}/{}",
             env!("CARGO_PKG_VERSION"),
             classifier::DETECTOR_VERSION,
             config.security,
             config.input_mode,
-            config.limits
+            config.limits,
+            serde_json::to_string(&config.filters)?
         )
         .as_bytes(),
     );
@@ -548,7 +578,6 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                                 classifier::detect_reader(&item.prefix, item.file.as_file_mut());
                             let mismatch =
                                 crate::detection::mismatch::evaluate(&original, &detection);
-                            repo.commit(item.file, &item.sha256, item.size)?;
                             let basename = original
                                 .rsplit(['/', '\\'])
                                 .next()
@@ -608,10 +637,20 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                                 ingest_date: date.clone(),
                                 run_id: run_id.clone(),
                             };
+                            if !config.filters.matches(&record)
+                                || removed.contains(&record.occurrence_id)
+                            {
+                                journal
+                                    .lock()
+                                    .map_err(|_| anyhow::anyhow!("journal lock poisoned"))?
+                                    .skipped_files += 1;
+                                continue;
+                            }
+                            repo.commit(item.file, &record.sha256, record.size)?;
                             let mut journal = journal
                                 .lock()
                                 .map_err(|_| anyhow::anyhow!("journal lock poisoned"))?;
-                            metadata::append(&mut journal.manifest, &record)?;
+                            metadata::publish(&repo, &mut journal.manifest, &record)?;
                             completed_records.push(record);
                             journal.accepted += 1;
                             journal.bytes += item.size;
@@ -706,6 +745,21 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
     file.as_file().sync_all()?;
     file.persist_noclobber(repo.root().join("reports").join(format!("{run_id}.json")))
         .context("cannot publish report")?;
+    if let Some(history) = &mut history {
+        history.record_counts(
+            None,
+            (report.accepted + report.reused_occurrences) as u64,
+            report.failures as u64,
+            report.skipped_files as u64,
+        )?;
+        history.finish(if report.interrupted {
+            130
+        } else if report.failures > 0 {
+            1
+        } else {
+            0
+        })?;
+    }
     Ok(report)
 }
 

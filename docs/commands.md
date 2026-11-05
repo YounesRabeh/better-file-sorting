@@ -20,6 +20,8 @@ stream independently. `NO_COLOR` disables auto color; `--no-color` overrides an
 explicit color selection. Cyan denotes headings/progress, green completion,
 yellow partial results, and red errors. Text labels carry the same meaning
 without color. Progress uses one shared line on interactive stderr.
+Known totals include percentage and ETA; unknown work uses a spinner with elapsed
+time. `--no-progress` hides loading indicators while retaining final results.
 
 `--json` writes machine-readable results without color or progress.
 JSON/JSONL/CSV mismatch formats never contain styling. `--quiet` suppresses
@@ -196,3 +198,39 @@ Commands loading runtime configuration use `-c/--config FILE`, otherwise check
 `./bfs.toml` in the current directory. Relative paths resolve from the working
 directory. Unknown settings and malformed or zero resource budgets are rejected.
 Omitted optional budgets and deadlines are unlimited; see [configuration](configuration.md).
+
+## Repository management and queries
+
+```sh
+bfsort query ./repository --include-format pdf --count
+bfsort query ./repository --mismatch mismatch --min-size 1024 --json
+bfsort verify ./repository --full
+bfsort diff ./repository ./other
+bfsort sample ./repository --count 100 --seed 42 -o ./sampled
+bfsort split ./repository --by format -o ./parts
+bfsort merge ./repository ./other -o ./merged
+bfsort status ./repository --json
+bfsort retry ./repository --operation OPERATION_ID
+bfsort remove ./repository --include-ext exe --dry-run
+bfsort remove ./repository --include-ext exe --confirm
+bfsort prune ./repository --dry-run
+```
+
+See [repository tools](repository-tools.md) for independent-copy guarantees,
+selection semantics, recovery history, and cleanup safeguards. `prune --confirm`
+reclaims only canonical objects with no recognized retained reference; removing
+an occurrence does not automatically reclaim its payload.
+
+## SQLite metadata and JSONL interchange
+
+```sh
+bfsort metadata migrate ./repository
+bfsort metadata export ./repository -o ./records.jsonl
+bfsort metadata import ./repository ./records.jsonl
+```
+
+Legacy queries/previews do not create a catalog. The first metadata mutation, or
+explicit `metadata migrate`, atomically imports the existing records. Once present,
+`metadata.sqlite3` is authoritative. Import requires payload objects already in
+the destination; export contains only active effective metadata. See
+[SQLite metadata](sqlite.md) for backup, schema, privacy and recovery guarantees.

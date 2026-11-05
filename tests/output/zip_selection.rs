@@ -189,7 +189,7 @@ fn directory_publication_never_replaces_a_concurrently_created_empty_destination
     fs::write(staged.join("ready.zip"), b"complete").unwrap();
     assert!(!output.exists());
     fs::create_dir(&output).unwrap(); // Another writer won after preflight.
-    assert!(bfs::repository::security::publish_directory(&staged, &output).is_err());
+    assert!(bfsort::repository::security::publish_directory(&staged, &output).is_err());
     assert_eq!(fs::read_dir(&output).unwrap().count(), 0);
     assert_eq!(fs::read(staged.join("ready.zip")).unwrap(), b"complete");
 }
@@ -197,7 +197,7 @@ fn directory_publication_never_replaces_a_concurrently_created_empty_destination
 #[test]
 fn conflicting_archive_file_and_directory_paths_are_rejected() {
     let root = tempfile::tempdir().unwrap();
-    let config = bfs::app::config::Config {
+    let config = bfsort::app::config::Config {
         zip_each_dir: true,
         zip_dirs: vec!["a".into(), "a.zip/nested".into()],
         output: root.path().join("output"),
@@ -205,17 +205,17 @@ fn conflicting_archive_file_and_directory_paths_are_rejected() {
     };
     let entries: Vec<_> = ["a/file.sample", "a.zip/nested/file.sample"]
         .into_iter()
-        .map(|path| bfs::organization::rules::Planned {
+        .map(|path| bfsort::organization::rules::Planned {
             path: path.into(),
             sha256: "a".repeat(64),
             occurrence_id: "b".repeat(64),
         })
         .collect();
     assert!(
-        bfs::output::archive::plan_exports(
+        bfsort::output::archive::plan_exports(
             &entries,
             &config,
-            &bfs::organization::rules::Rules::default()
+            &bfsort::organization::rules::Rules::default()
         )
         .is_err()
     );

@@ -1,0 +1,6 @@
+# CLI lists replace the matching configured list; other lists still apply.
+[filters]
+include_extensions = ["pdf", "docx"]
+exclude_extensions = ["exe", "dll"]
+include_formats = []
+exclude_formats = []

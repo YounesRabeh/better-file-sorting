@@ -321,7 +321,7 @@ fn empty_zip_payload_reports_signed_growth_without_a_percentage() {
 
 #[test]
 fn failed_and_cancelled_preview_leave_destination_and_staging_untouched() {
-    use bfs::{
+    use bfsort::{
         app::config::{Config, InputMode},
         ingest::pipeline,
     };

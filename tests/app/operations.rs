@@ -1,0 +1,259 @@
+use bfsort::{
+    app::config::SecurityMode,
+    operations::{self, Guard},
+    repository::{catalog, storage::Repository},
+};
+
+#[test]
+fn lifecycle_retry_and_read_only_status() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("repo");
+    let _repo = Repository::open(&root, SecurityMode::Standard).unwrap();
+    let args = vec!["reclassify".into(), root.to_str().unwrap().into()];
+    let mut guard = Guard::start(&root, "reclassify", &args).unwrap();
+    let rows = operations::status(&root).unwrap();
+    assert_eq!(rows[0].state, "running");
+    assert!(operations::retry_arguments(&root, &rows[0].id).is_err());
+    guard.finish(1).unwrap();
+    let rows = operations::status(&root).unwrap();
+    assert_eq!(rows[0].state, "failed");
+    let retry = operations::retry_arguments(&root, &rows[0].id).unwrap();
+    assert!(retry.iter().any(|s| s == "--resume"));
+    assert!(operations::retry_arguments(&root, "../bad").is_err());
+}
+
+#[test]
+fn drop_failure_and_unowned_running_record_is_interrupted() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("repo");
+    let _repo = Repository::open(&root, SecurityMode::Standard).unwrap();
+    let args = vec!["reclassify".into(), root.to_str().unwrap().into()];
+    drop(Guard::start(&root, "reclassify", &args).unwrap());
+    let mut rows = operations::status(&root).unwrap();
+    assert_eq!(rows[0].state, "failed");
+    rows[0].state = "running".into();
+    let record = serde_json::to_string(&rows[0]).unwrap();
+    catalog::write(&root)
+        .unwrap()
+        .put_operation(&rows[0].id, &record)
+        .unwrap();
+    let before = catalog::read(&root).unwrap().operations().unwrap();
+    assert_eq!(operations::status(&root).unwrap()[0].state, "interrupted");
+    assert_eq!(catalog::read(&root).unwrap().operations().unwrap(), before);
+}
+
+#[test]
+fn rejects_secrets_unsupported_commands_and_zip_retry() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("repo");
+    let _repo = Repository::open(&root, SecurityMode::Standard).unwrap();
+    for url in [
+        "https://user:pass@example.com/",
+        "https://example.com/?token=secret",
+    ] {
+        assert!(Guard::start(&root, "collect", &["collect".into(), url.into()]).is_err());
+    }
+    assert!(Guard::start(&root, "stats", &["stats".into()]).is_err());
+    assert!(
+        Guard::start(
+            &root,
+            "ingest",
+            &["ingest".into(), "--unknown-secret".into()]
+        )
+        .is_err()
+    );
+    let mut guard = Guard::start(&root, "ingest", &["ingest".into(), "--zip".into()]).unwrap();
+    guard.finish(1).unwrap();
+    let rows = operations::status(&root).unwrap();
+    assert!(operations::retry_arguments(&root, &rows[0].id).is_err());
+}
+
+#[test]
+fn interruption_retry_link_and_changed_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("repo");
+    let _repo = Repository::open(&root, SecurityMode::Standard).unwrap();
+    let config = temp.path().join("settings.toml");
+    std::fs::write(&config, "workers = 1\n").unwrap();
+    let args = vec![
+        "analyze".into(),
+        root.to_str().unwrap().into(),
+        "--config".into(),
+        config.to_str().unwrap().into(),
+    ];
+    let mut guard = Guard::start(&root, "analyze", &args).unwrap();
+    guard.interrupt().unwrap();
+    let parent = operations::status(&root).unwrap()[0].id.clone();
+    assert_eq!(operations::status(&root).unwrap()[0].state, "interrupted");
+    assert!(operations::retry_arguments(&root, &parent).is_ok());
+    let mut child = Guard::start(&root, "analyze", &args).unwrap();
+    child.set_retry_of(&parent).unwrap();
+    child.finish(0).unwrap();
+    assert!(
+        operations::status(&root)
+            .unwrap()
+            .iter()
+            .any(|r| r.retry_of.as_deref() == Some(&parent))
+    );
+    std::fs::write(&config, "workers = 2\n").unwrap();
+    assert!(operations::retry_arguments(&root, &parent).is_err());
+}
+
+#[test]
+fn configured_password_is_required_again_and_config_zip_refuses_resume() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("repo");
+    let _repo = Repository::open(&root, SecurityMode::Standard).unwrap();
+    let password = temp.path().join("password");
+    std::fs::write(&password, "secret\n").unwrap();
+    std::fs::set_permissions(&password, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let config = temp.path().join("settings.toml");
+    std::fs::write(
+        &config,
+        format!("password_file = {:?}\n", password.to_str().unwrap()),
+    )
+    .unwrap();
+    let args = vec![
+        "analyze".into(),
+        root.to_str().unwrap().into(),
+        "--config".into(),
+        config.to_str().unwrap().into(),
+    ];
+    let mut guard = Guard::start(&root, "analyze", &args).unwrap();
+    guard.finish(1).unwrap();
+    let id = operations::status(&root).unwrap()[0].id.clone();
+    assert!(operations::retry_arguments(&root, &id).is_ok());
+    std::fs::remove_file(password).unwrap();
+    assert!(operations::retry_arguments(&root, &id).is_err());
+    let persisted = catalog::read(&root)
+        .unwrap()
+        .operations()
+        .unwrap()
+        .join("\n");
+    assert!(!persisted.contains("secret"));
+    std::fs::write(&config, "zip = true\n").unwrap();
+    let args = vec![
+        "ingest".into(),
+        "--config".into(),
+        config.to_str().unwrap().into(),
+    ];
+    let mut guard = Guard::start(&root, "ingest", &args).unwrap();
+    guard.finish(1).unwrap();
+    let rows = operations::status(&root).unwrap();
+    let id = &rows.iter().find(|r| r.command == "ingest").unwrap().id;
+    assert!(operations::retry_arguments(&root, id).is_err());
+}
+
+#[test]
+fn recorded_counts_checkpoint_links_and_generic_errors() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("repo");
+    let _repo = Repository::open(&root, SecurityMode::Standard).unwrap();
+    let args = vec!["reclassify".into(), root.to_str().unwrap().into()];
+    let mut guard = Guard::start(&root, "reclassify", &args).unwrap();
+    guard.record_counts(Some(3), 1, 1, 1).unwrap();
+    guard.finish(2).unwrap();
+    let rows = operations::status(&root).unwrap();
+    let counts = rows[0].counts.as_ref().unwrap();
+    assert_eq!(
+        (
+            counts.total,
+            counts.completed,
+            counts.failed,
+            counts.skipped
+        ),
+        (Some(3), 1, 1, 1)
+    );
+    assert_eq!(
+        rows[0].last_error.as_deref(),
+        Some("operation failed; inspect command reports")
+    );
+    assert_eq!(rows[0].checkpoints, ["reports/reclassification"]);
+    assert_eq!(rows[0].app_version, env!("CARGO_PKG_VERSION"));
+}
+
+#[test]
+fn retry_refuses_changed_rules_referenced_by_unchanged_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("repo");
+    let _repo = Repository::open(&root, SecurityMode::Standard).unwrap();
+    let rules = temp.path().join("rules.toml");
+    std::fs::write(&rules, "# initial rules\n").unwrap();
+    let config = temp.path().join("settings.toml");
+    let contents = format!("rules = {:?}\n", rules.to_str().unwrap());
+    std::fs::write(&config, &contents).unwrap();
+    let args = vec![
+        "analyze".into(),
+        root.to_str().unwrap().into(),
+        "--config".into(),
+        config.to_str().unwrap().into(),
+    ];
+    let mut guard = Guard::start(&root, "analyze", &args).unwrap();
+    guard.finish(1).unwrap();
+    let id = operations::status(&root).unwrap()[0].id.clone();
+    assert!(operations::retry_arguments(&root, &id).is_ok());
+    std::fs::write(&rules, "# changed rules\n").unwrap();
+    assert_eq!(std::fs::read_to_string(config).unwrap(), contents);
+    assert!(operations::retry_arguments(&root, &id).is_err());
+}
+
+#[test]
+fn repository_history_uses_catalog_authority_and_collection_stays_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("repo");
+    let _repo = Repository::open(&root, SecurityMode::Standard).unwrap();
+    let args = vec!["reclassify".into(), root.to_str().unwrap().into()];
+    let mut guard = Guard::start(&root, "reclassify", &args).unwrap();
+    guard.finish(0).unwrap();
+    assert!(catalog::exists(&root).unwrap());
+    let mut record = operations::status(&root).unwrap().remove(0);
+    assert_eq!(record.state, "completed");
+    record.state = "failed".into();
+    let legacy = root
+        .join("operations/history")
+        .join(format!("{}.json", record.id));
+    bfsort::collection::acquisition::save_json(&legacy, &record).unwrap();
+    assert_eq!(operations::status(&root).unwrap()[0].state, "completed");
+    let collection = temp.path().join("collection");
+    let mut guard = Guard::start(&collection, "download", &["download".into()]).unwrap();
+    guard.finish(0).unwrap();
+    assert!(!catalog::exists(&collection).unwrap());
+    let record = operations::status(&collection).unwrap().remove(0);
+    assert!(
+        collection
+            .join("operations/history")
+            .join(format!("{}.json", record.id))
+            .is_file()
+    );
+}
+
+#[test]
+fn legacy_status_is_read_only_and_first_mutation_migrates_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let collection = temp.path().join("collection");
+    let mut guard = Guard::start(&collection, "download", &["download".into()]).unwrap();
+    guard.finish(1).unwrap();
+    let old = operations::status(&collection).unwrap().remove(0);
+    let root = temp.path().join("repo");
+    let _repo = Repository::open(&root, SecurityMode::Standard).unwrap();
+    bfsort::repository::security::private_dir(&root.join("operations")).unwrap();
+    bfsort::repository::security::private_dir(&root.join("operations/history")).unwrap();
+    bfsort::collection::acquisition::save_json(
+        &root
+            .join("operations/history")
+            .join(format!("{}.json", old.id)),
+        &old,
+    )
+    .unwrap();
+    assert!(!catalog::exists(&root).unwrap());
+    assert_eq!(operations::status(&root).unwrap()[0].id, old.id);
+    assert!(!catalog::exists(&root).unwrap());
+    let args = vec!["reclassify".into(), root.to_str().unwrap().into()];
+    let mut guard = Guard::start(&root, "reclassify", &args).unwrap();
+    guard.finish(0).unwrap();
+    assert!(catalog::exists(&root).unwrap());
+    let rows = operations::status(&root).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().any(|r| r.id == old.id));
+}

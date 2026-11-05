@@ -26,7 +26,7 @@ fn nested_analysis_preserves_parents_and_reuses_archives() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let records = bfs::repository::metadata::load(&repo).unwrap();
+    let records = bfsort::repository::metadata::load(&repo).unwrap();
     assert_eq!(records.len(), 4);
     let children: Vec<_> = records
         .iter()
@@ -55,7 +55,7 @@ fn nested_analysis_preserves_parents_and_reuses_archives() {
         "{}",
         String::from_utf8_lossy(&rerun.stderr)
     );
-    assert_eq!(bfs::repository::metadata::load(&repo).unwrap().len(), 4);
+    assert_eq!(bfsort::repository::metadata::load(&repo).unwrap().len(), 4);
     let report: serde_json::Value = serde_json::from_slice(&rerun.stdout).unwrap();
     assert_eq!(report["nested"]["metrics"]["extracted_archives"], 0);
     assert_eq!(report["nested"]["metrics"]["reused_archives"], 3);
@@ -99,7 +99,7 @@ fn analyze_existing_repository_without_original_source() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(bfs::repository::metadata::load(&repo).unwrap().len(), 2);
+    assert_eq!(bfsort::repository::metadata::load(&repo).unwrap().len(), 2);
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn nested_configuration_rejects_contradictory_depths() {
         "nested_extraction = false\nmax_depth = 1",
         "nested_extraction = true\nmax_depth = 1\nmax_total_entries = 0",
     ] {
-        let config = toml::from_str::<bfs::app::config::Config>(&format!(
+        let config = toml::from_str::<bfsort::app::config::Config>(&format!(
             "input_mode = 'archives'\n[archive]\n{text}"
         ));
         assert!(config.is_err() || config.unwrap().validate().is_err());
@@ -215,7 +215,7 @@ fn password_retry_reuses_completed_siblings_and_never_persists_secrets() {
     ];
     let out = run(&args);
     assert!(!out.status.success());
-    assert_eq!(bfs::repository::metadata::load(&repo).unwrap().len(), 3);
+    assert_eq!(bfsort::repository::metadata::load(&repo).unwrap().len(), 3);
     fs::write(&passwords, "nested-fixture-password\n").unwrap();
     let out = run(&args);
     assert!(
@@ -226,7 +226,7 @@ fn password_retry_reuses_completed_siblings_and_never_persists_secrets() {
     let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(report["nested"]["metrics"]["extracted_archives"], 1);
     assert_eq!(report["nested"]["metrics"]["reused_archives"], 2);
-    assert_eq!(bfs::repository::metadata::load(&repo).unwrap().len(), 4);
+    assert_eq!(bfsort::repository::metadata::load(&repo).unwrap().len(), 4);
     for entry in walkdir::WalkDir::new(repo.join("operations")) {
         let entry = entry.unwrap();
         if entry.file_type().is_file() {
@@ -259,7 +259,7 @@ fn tree_limit_keeps_successfully_extracted_siblings() {
         config.as_os_str(),
     ]);
     assert!(!out.status.success());
-    let rows = bfs::repository::metadata::load(&repo).unwrap();
+    let rows = bfsort::repository::metadata::load(&repo).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].original_name, "keep.txt");
 }
@@ -308,7 +308,10 @@ fn wide_sealed_archive_uses_bounded_descriptors() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(bfs::repository::metadata::load(&repo).unwrap().len(), 400);
+    assert_eq!(
+        bfsort::repository::metadata::load(&repo).unwrap().len(),
+        400
+    );
 }
 
 #[test]
@@ -431,7 +434,7 @@ fn analysis_after_nested_ingestion_keeps_existing_occurrence_ids() {
         .status
         .success()
     );
-    let before = bfs::repository::metadata::load(&repo).unwrap();
+    let before = bfsort::repository::metadata::load(&repo).unwrap();
     let out = run(&[
         "analyze".as_ref(),
         repo.as_os_str(),
@@ -444,7 +447,7 @@ fn analysis_after_nested_ingestion_keeps_existing_occurrence_ids() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let after = bfs::repository::metadata::load(&repo).unwrap();
+    let after = bfsort::repository::metadata::load(&repo).unwrap();
     assert_eq!(before.len(), after.len());
     assert_eq!(
         serde_json::to_value(before).unwrap(),
@@ -507,14 +510,28 @@ fn malformed_provenance_depth_is_rejected_before_traversal() {
         .status
         .success()
     );
-    for entry in fs::read_dir(repo.join("manifests")).unwrap() {
-        let path = entry.unwrap().path();
-        let text = fs::read_to_string(&path).unwrap();
-        if !text.trim().is_empty() {
-            let mut row: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
-            row["nested"]["archive_depth"] = usize::MAX.into();
-            fs::write(path, format!("{row}\n")).unwrap();
-        }
+    let connection =
+        rusqlite::Connection::open(repo.join(bfsort::repository::catalog::FILE_NAME)).unwrap();
+    let records: Vec<(String, String)> = {
+        let mut statement = connection
+            .prepare("SELECT id,record FROM occurrences")
+            .unwrap();
+        statement
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    };
+    for (id, text) in records {
+        let mut row: serde_json::Value = serde_json::from_str(&text).unwrap();
+        row["nested"]["archive_depth"] = usize::MAX.into();
+        connection
+            .execute(
+                "UPDATE occurrences SET record=?1 WHERE id=?2",
+                rusqlite::params![row.to_string(), id],
+            )
+            .unwrap();
     }
-    assert!(bfs::repository::metadata::load(&repo).is_err());
+    drop(connection);
+    assert!(bfsort::repository::metadata::load(&repo).is_err());
 }

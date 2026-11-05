@@ -263,6 +263,7 @@ pub fn discover(
     download: &DownloadConfig,
     cancelled: &AtomicBool,
 ) -> Result<Inventory> {
+    let _progress = crate::app::presentation::Progress::new(None, "Discovering resources");
     let started = Instant::now();
     let deadline = config
         .timeout_seconds

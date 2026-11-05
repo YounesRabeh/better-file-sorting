@@ -22,6 +22,8 @@ use std::{
 /// Previous generations are deliberately retained for recovery.
 /// Build a view from metadata without reading canonical payload contents.
 pub fn organize(repo: &Repository, rules: &Rules, plan: &[Planned]) -> Result<String> {
+    let progress =
+        crate::app::presentation::Progress::new(Some(plan.len() as u64), "Publishing view entries");
     let views = repo.root().join("views");
     security::private_dir(&views)?;
     let staging = security::private_tempdir(&repo.staging(), "view-")?;
@@ -35,6 +37,7 @@ pub fn organize(repo: &Repository, rules: &Rules, plan: &[Planned]) -> Result<St
         let source = repo.object(&entry.sha256)?;
         security::validate_file(&source, repo.mode())?;
         if rules.organization.view_mode == ViewMode::Manifest {
+            progress.0.inc(1);
             continue;
         }
         let destination = staging.path().join(&entry.path);
@@ -55,7 +58,9 @@ pub fn organize(repo: &Repository, rules: &Rules, plan: &[Planned]) -> Result<St
         fs::hard_link(&source, &destination)
             .context("hard link failed; use view_mode = 'manifest' for this filesystem")?;
         security::validate_file(&destination, repo.mode())?;
+        progress.0.inc(1);
     }
+    progress.0.set_message("synchronizing view metadata");
     let mut policy = tempfile::NamedTempFile::new_in(staging.path())?;
     serde_json::to_writer(&mut policy, rules)?;
     policy.as_file().sync_all()?;
@@ -79,6 +84,7 @@ pub fn organize(repo: &Repository, rules: &Rules, plan: &[Planned]) -> Result<St
     let target = views.join(&generation);
     // A random private generation is never reused or overwritten.
     anyhow::ensure!(!target.try_exists()?, "view generation already exists");
+    repo.with_catalog(|catalog| catalog.record_view(&generation, plan))?;
     fs::rename(staging.path(), &target)?;
     File::open(&views)?.sync_all()?;
     let pointer = views.join("CURRENT");

@@ -5,7 +5,7 @@
 //! Exercises public BFS behavior with disposable fixtures; failures should identify
 //! contract regressions without changing user repositories.
 
-use bfs::{collection::acquisition::SourceConfig, collection::http_source::parse_links};
+use bfsort::{collection::acquisition::SourceConfig, collection::http_source::parse_links};
 #[test]
 fn links_are_resolved_and_first_url_keeps_dom_order() {
     let config = SourceConfig {
@@ -38,7 +38,7 @@ fn discovery_reads_local_http_page_and_limits_redirect_requests() {
         page,
         ..Default::default()
     };
-    let result = bfs::collection::http_source::discover(
+    let result = bfsort::collection::http_source::discover(
         &source,
         &Default::default(),
         &AtomicBool::new(false),
@@ -63,11 +63,11 @@ fn redirect_hops_consume_request_budget() {
         assert!(stream.read(&mut request).unwrap() > 0);
         write!(stream,"HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
     });
-    let config = bfs::collection::acquisition::DownloadConfig {
+    let config = bfsort::collection::acquisition::DownloadConfig {
         max_requests: Some(1),
         ..Default::default()
     };
-    let http = bfs::collection::http_source::HttpSource::new(
+    let http = bfsort::collection::http_source::HttpSource::new(
         &SourceConfig {
             page: page.clone(),
             ..Default::default()
@@ -99,7 +99,7 @@ fn rate_limited_origin_is_not_requested_again() {
         assert!(stream.read(&mut request).unwrap() > 0);
         write!(stream,"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 60\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
     });
-    let http = bfs::collection::http_source::HttpSource::new(
+    let http = bfsort::collection::http_source::HttpSource::new(
         &SourceConfig {
             page: page.clone(),
             ..Default::default()
@@ -151,7 +151,7 @@ fn discover_url_cli_writes_default_inventory_without_config() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let inventory = bfs::collection::acquisition::load_inventory(
+    let inventory = bfsort::collection::acquisition::load_inventory(
         &temp.path().join("collection/inventory.jsonl"),
     )
     .unwrap();
@@ -208,7 +208,7 @@ fn default_workflow_needs_no_config_file() {
     run(&["download", "--dry-run"]);
     run(&["download"]);
     worker.join().unwrap();
-    let config = bfs::collection::acquisition::DownloadConfig {
+    let config = bfsort::collection::acquisition::DownloadConfig {
         staging_dir: temp.path().join("collection/downloads"),
         ..Default::default()
     };
@@ -218,8 +218,8 @@ fn default_workflow_needs_no_config_file() {
         .map(|e| e.unwrap().path())
         .find(|p| p.extension().is_some_and(|e| e == "json"))
         .unwrap();
-    let receipt: bfs::collection::acquisition::DownloadReceipt =
-        bfs::collection::acquisition::load_json(&receipt_path).unwrap();
+    let receipt: bfsort::collection::acquisition::DownloadReceipt =
+        bfsort::collection::acquisition::load_json(&receipt_path).unwrap();
     std::fs::set_permissions(
         config.staging_dir.join(receipt.path),
         std::fs::Permissions::from_mode(0o600),
@@ -234,7 +234,7 @@ fn default_workflow_needs_no_config_file() {
 
 #[test]
 fn discovery_keeps_dom_order_and_download_priority_is_separate() {
-    use bfs::collection::acquisition::*;
+    use bfsort::collection::acquisition::*;
     let source = SourceConfig {
         page: "http://localhost/".into(),
         ..Default::default()

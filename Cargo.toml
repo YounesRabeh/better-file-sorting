@@ -1,9 +1,12 @@
 [package]
-name = "bfs"
-version = "0.8.0"
+name = "bfsort"
+version = "0.9.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "Metadata-driven, permission-restricted ZIP sample organizer"
+
+[lib]
+name = "bfsort"
 
 [dependencies]
 anyhow = "1"
@@ -27,6 +30,7 @@ ctrlc = "3"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 scraper = { version = "0.24", default-features = false }
 url = "2"
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { version = "1", features = ["fs"] }

@@ -5,7 +5,7 @@
 //! Exercises public BFS behavior with disposable fixtures; failures should identify
 //! contract regressions without changing user repositories.
 
-use bfs::{collection::acquisition::*, collection::download};
+use bfsort::{collection::acquisition::*, collection::download};
 #[test]
 fn dry_run_never_creates_staging() {
     let temp = tempfile::tempdir().unwrap();
@@ -68,13 +68,13 @@ fn transfer_response(
         let _ = stream.write_all(body);
     });
     let candidate = Candidate {
-        source_id: bfs::repository::metadata::digest(url.as_bytes()),
+        source_id: bfsort::repository::metadata::digest(url.as_bytes()),
         url: url.clone(),
         name: "a.zip".into(),
     };
     let config = DownloadConfig {
         staging_dir: root.path().join("downloads"),
-        max_file_size: Some(bfs::collection::acquisition::parse_bytes(limit).unwrap()),
+        max_file_size: Some(bfsort::collection::acquisition::parse_bytes(limit).unwrap()),
         max_speed: speed,
         timeout_seconds: Some(1),
         ..Default::default()
@@ -126,7 +126,7 @@ fn sealed_receipt_requires_explicit_unlock_then_verifies_hash() {
     use std::os::unix::fs::PermissionsExt;
     let (_root, config, report) = transfer(b"fixture", "1 KB");
     assert!(
-        bfs::collection::acquisition::completed_inputs(&config)
+        bfsort::collection::acquisition::completed_inputs(&config)
             .unwrap_err()
             .to_string()
             .contains("unlock")
@@ -136,13 +136,13 @@ fn sealed_receipt_requires_explicit_unlock_then_verifies_hash() {
         .join(download::payload_path(&config, &report.candidates[0]));
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
     assert_eq!(
-        bfs::collection::acquisition::completed_inputs(&config)
+        bfsort::collection::acquisition::completed_inputs(&config)
             .unwrap()
             .len(),
         1
     );
     std::fs::write(&path, b"changed").unwrap();
-    assert!(bfs::collection::acquisition::completed_inputs(&config).is_err());
+    assert!(bfsort::collection::acquisition::completed_inputs(&config).is_err());
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn downloaded_zip_flows_through_existing_ingest() {
     )
     .unwrap();
     use clap::Parser;
-    let bfs::app::cli::Command::Ingest(args) = bfs::app::cli::Cli::parse_from([
+    let bfsort::app::cli::Command::Ingest(args) = bfsort::app::cli::Cli::parse_from([
         "bfs",
         "ingest",
         "--config",
@@ -182,10 +182,10 @@ fn downloaded_zip_flows_through_existing_ingest() {
     else {
         panic!()
     };
-    let ingest = bfs::app::config::Config::for_ingest(&args).unwrap();
-    let preview = bfs::ingest::pipeline::preview(&ingest, &AtomicBool::new(false)).unwrap();
+    let ingest = bfsort::app::config::Config::for_ingest(&args).unwrap();
+    let preview = bfsort::ingest::pipeline::preview(&ingest, &AtomicBool::new(false)).unwrap();
     assert_eq!(preview.plan.len(), 1);
-    let result = bfs::ingest::pipeline::ingest(&ingest, &AtomicBool::new(false)).unwrap();
+    let result = bfsort::ingest::pipeline::ingest(&ingest, &AtomicBool::new(false)).unwrap();
     assert_eq!(result.accepted, 1);
     assert_eq!(result.failures, 0);
     assert!(root.path().join("sorted.zip").is_file());
@@ -319,7 +319,7 @@ fn duplicate_output_names_fail_before_staging_is_created() {
         candidates: ["http://localhost/a/same.zip", "http://localhost/b/same.zip"]
             .into_iter()
             .map(|url| Candidate {
-                source_id: bfs::repository::metadata::digest(url.as_bytes()),
+                source_id: bfsort::repository::metadata::digest(url.as_bytes()),
                 url: url.into(),
                 name: "same.zip".into(),
             })
@@ -388,7 +388,7 @@ fn unlimited_transfer_cancels_while_response_body_stalls() {
         ..Default::default()
     };
     let candidate = Candidate {
-        source_id: bfs::repository::metadata::digest(url.as_bytes()),
+        source_id: bfsort::repository::metadata::digest(url.as_bytes()),
         url: url.clone(),
         name: "stall.zip".into(),
     };

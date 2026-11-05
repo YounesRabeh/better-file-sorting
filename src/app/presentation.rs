@@ -23,6 +23,9 @@ pub fn color_enabled(
             ColorMode::Auto => tty && !env_no_color,
         }
 }
+pub fn progress_enabled(quiet: bool, json: bool, no_progress: bool, tty: bool) -> bool {
+    !quiet && !json && !no_progress && tty
+}
 pub fn initialize(args: &Presentation) {
     COLOR.store(
         color_enabled(
@@ -35,7 +38,12 @@ pub fn initialize(args: &Presentation) {
         Ordering::Relaxed,
     );
     PROGRESS.store(
-        !args.quiet && !args.json && std::io::stderr().is_terminal(),
+        progress_enabled(
+            args.quiet,
+            args.json,
+            args.no_progress,
+            std::io::stderr().is_terminal(),
+        ),
         Ordering::Relaxed,
     );
 }
@@ -50,13 +58,9 @@ pub fn label(text: &str, code: &str) -> String {
 pub struct Progress(pub indicatif::ProgressBar);
 impl Progress {
     pub fn new(total: Option<u64>, operation: &str) -> Self {
-        let bar = if PROGRESS.load(Ordering::Relaxed) {
-            match total {
-                Some(n) => indicatif::ProgressBar::new(n),
-                None => indicatif::ProgressBar::new_spinner(),
-            }
-        } else {
-            indicatif::ProgressBar::hidden()
+        let bar = match total {
+            Some(n) => indicatif::ProgressBar::new(n),
+            None => indicatif::ProgressBar::new_spinner(),
         };
         bar.set_draw_target(indicatif::ProgressDrawTarget::stderr_with_hz(8));
         if !PROGRESS.load(Ordering::Relaxed) {
@@ -64,8 +68,8 @@ impl Progress {
         }
         bar.set_style(
             indicatif::ProgressStyle::with_template(match (total.is_some(), COLOR.load(Ordering::Relaxed)) {
-                (true, true) => "{prefix} [{wide_bar:.cyan/blue}] {pos}/{len} [{elapsed_precise}] {per_sec} {msg}",
-                (true, false) => "{prefix} [{wide_bar}] {pos}/{len} [{elapsed_precise}] {per_sec} {msg}",
+                (true, true) => "{prefix} [{wide_bar:.cyan/blue}] {pos}/{len} {percent}% [{elapsed_precise}] {per_sec} ETA {eta_precise} {msg}",
+                (true, false) => "{prefix} [{wide_bar}] {pos}/{len} {percent}% [{elapsed_precise}] {per_sec} ETA {eta_precise} {msg}",
                 (false, true) => "{prefix} {spinner:.cyan} [{elapsed_precise}] {msg}",
                 (false, false) => "{prefix} {spinner} [{elapsed_precise}] {msg}",
             })
@@ -94,6 +98,45 @@ pub fn safe_text(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn progress_policy() {
+        assert!(progress_enabled(false, false, false, true));
+        assert!(!progress_enabled(true, false, false, true));
+        assert!(!progress_enabled(false, true, false, true));
+        assert!(!progress_enabled(false, false, true, true));
+        assert!(!progress_enabled(false, false, false, false));
+    }
+    #[test]
+    fn hidden_progress_tracks_zero_unknown_and_completed_work() {
+        let empty = Progress::new(Some(0), "empty");
+        assert!(empty.0.is_hidden());
+        assert_eq!(empty.0.length(), Some(0));
+        let unknown = Progress::new(None, "unknown");
+        assert_eq!(unknown.0.length(), None);
+        let bar = Progress::new(Some(2), "objects");
+        bar.0.inc(1);
+        bar.0.inc(1);
+        assert_eq!(bar.0.position(), 2);
+        let observer = bar.0.clone();
+        drop(bar);
+        assert!(observer.is_finished());
+    }
+    #[test]
+    fn progress_clears_on_error_and_cancellation() {
+        for cancelled in [false, true] {
+            let observer = std::cell::RefCell::new(None);
+            let operation = || -> Result<(), &'static str> {
+                let progress = Progress::new(None, "operation");
+                *observer.borrow_mut() = Some(progress.0.clone());
+                if cancelled {
+                    return Err("interrupted");
+                }
+                Err("failed")
+            };
+            assert!(operation().is_err());
+            assert!(observer.borrow().as_ref().unwrap().is_finished());
+        }
+    }
     #[test]
     fn color_precedence() {
         assert_eq!(safe_text("a\x1b[31m\n.zip"), "a\\u{1b}[31m\\n.zip");

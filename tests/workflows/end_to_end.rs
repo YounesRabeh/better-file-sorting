@@ -234,7 +234,7 @@ fn obsolete_acquisition_state_is_rejected_without_deleting_it() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("collection")).unwrap();
     let path = dir.path().join("collection/inventory.jsonl");
-    bfs::collection::acquisition::save_json(
+    bfsort::collection::acquisition::save_json(
         &path,
         &serde_json::json!({"version":1,"candidates":[]}),
     )
@@ -244,9 +244,9 @@ fn obsolete_acquisition_state_is_rejected_without_deleting_it() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("re-discover"));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), obsolete);
-    bfs::collection::acquisition::private_tree(&dir.path().join("collection/downloads/control"))
+    bfsort::collection::acquisition::private_tree(&dir.path().join("collection/downloads/control"))
         .unwrap();
-    bfs::collection::acquisition::save_json(
+    bfsort::collection::acquisition::save_json(
         &dir.path().join("collection/downloads/control/old.json"),
         &serde_json::json!({"version":1}),
     )

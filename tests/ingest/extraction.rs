@@ -5,7 +5,7 @@
 //! Exercises public BFS behavior with disposable fixtures; failures should identify
 //! contract regressions without changing user repositories.
 
-use bfs::{app::config::Limits, ingest::extraction::extract};
+use bfsort::{app::config::Limits, ingest::extraction::extract};
 use std::{fs::File, io::Write, sync::atomic::AtomicBool};
 use zip::{ZipWriter, write::SimpleFileOptions};
 /// Build an encrypted or plain single-entry ZIP fixture.
@@ -161,7 +161,7 @@ fn omitted_budgets_process_files_beyond_previous_size_and_ratio_caps() {
         .unwrap()
         .set_len(256 * 1024 * 1024 + 1)
         .unwrap();
-    let item = bfs::ingest::extraction::extract_file(
+    let item = bfsort::ingest::extraction::extract_file(
         &input,
         t.path(),
         &Limits::default(),
@@ -201,7 +201,7 @@ fn archive_open_accepts_more_than_old_input_and_entry_caps() {
     writer.finish().unwrap();
     assert!(std::fs::metadata(&path).unwrap().len() > 1024 * 1024 * 1024);
     assert_eq!(
-        bfs::output::archive::open(&path, &Limits::default())
+        bfsort::output::archive::open(&path, &Limits::default())
             .unwrap()
             .len(),
         1
@@ -215,13 +215,13 @@ fn archive_open_accepts_more_than_old_input_and_entry_caps() {
     }
     writer.finish().unwrap();
     assert_eq!(
-        bfs::output::archive::open(&path, &Limits::default())
+        bfsort::output::archive::open(&path, &Limits::default())
             .unwrap()
             .len(),
         10001
     );
     assert!(
-        bfs::output::archive::open(
+        bfsort::output::archive::open(
             &path,
             &Limits {
                 max_entries: Some(10000),

@@ -7,7 +7,7 @@
 
 #![cfg(unix)]
 use crate::common;
-use bfs::{app::config::SecurityMode, repository::storage::Repository};
+use bfsort::{app::config::SecurityMode, repository::storage::Repository};
 use std::os::unix::fs::PermissionsExt;
 #[test]
 /// Ensure output symlinks and weak password files fail closed.

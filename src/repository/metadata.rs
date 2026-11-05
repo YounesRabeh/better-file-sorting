@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Younidev. See LICENSE for license terms.
 
-//! Stores and loads occurrence manifests describing ingested content and its origins.
+//! Stores occurrence metadata in SQLite and exchanges validated JSONL snapshots.
 //! Content hashes identify objects; occurrence identities retain distinct source events.
-//! Loading validates bounded records, reconciles duplicates and tolerates interrupted
-//! final journal lines. Optional remote provenance preserves compatibility with old data.
+//! Legacy imports validate bounded records and tolerate interrupted final journal lines.
+//! SQLite owns current state; optional remote provenance preserves old-data compatibility.
 
 use crate::{app::config::SecurityMode, repository::security, repository::storage::valid_hash};
 use anyhow::{Result, ensure};
@@ -103,8 +103,118 @@ pub fn append(writer: &mut fs::File, record: &impl Serialize) -> Result<()> {
     writer.sync_data()?;
     Ok(())
 }
+/// Publish metadata only after the referenced payload is durable, then emit JSONL compatibility data.
+pub fn publish(
+    repo: &super::storage::Repository,
+    writer: &mut fs::File,
+    record: &Occurrence,
+) -> Result<()> {
+    store(repo, record)?;
+    append(writer, record)
+}
+
+pub fn store(repo: &super::storage::Repository, record: &Occurrence) -> Result<()> {
+    record.validate()?;
+    let path = repo.object(&record.sha256)?;
+    security::validate_file(&path, repo.mode())?;
+    ensure!(
+        fs::metadata(path)?.len() == record.size,
+        "manifest/object size mismatch"
+    );
+    repo.with_catalog(|catalog| catalog.insert(record))
+}
+
+/// Import an entire interchange file atomically; never publish partial input or replace identities.
+pub fn import_jsonl(repo: &super::storage::Repository, input: &Path) -> Result<usize> {
+    crate::ingest::discovery::check_path(input)?;
+    ensure!(
+        fs::symlink_metadata(input)?.is_file(),
+        "JSONL input must be a regular file"
+    );
+    let mut reader = BufReader::new(fs::File::open(input)?);
+    let mut rows = BTreeMap::new();
+    loop {
+        let mut line = Vec::new();
+        let count =
+            std::io::Read::take(&mut reader, 1024 * 1024 + 1).read_until(b'\n', &mut line)?;
+        if count == 0 {
+            break;
+        }
+        ensure!(
+            count <= 1024 * 1024 && line.ends_with(b"\n"),
+            "invalid or interrupted JSONL import record"
+        );
+        let row: Occurrence = serde_json::from_slice(&line)?;
+        row.validate()?;
+        let object = repo.object(&row.sha256)?;
+        security::validate_file(&object, repo.mode())?;
+        ensure!(
+            fs::metadata(object)?.len() == row.size,
+            "import references a missing or inconsistent object"
+        );
+        if let Some(previous) = rows.insert(row.occurrence_id.clone(), row.clone()) {
+            ensure!(
+                serde_json::to_value(previous)? == serde_json::to_value(row)?,
+                "conflicting imported occurrence identity"
+            );
+        }
+    }
+    let existing: BTreeMap<_, _> = load_all(repo.root())?
+        .into_iter()
+        .map(|r| (r.occurrence_id.clone(), r))
+        .collect();
+    for row in rows.values() {
+        if let Some(previous) = existing.get(&row.occurrence_id) {
+            ensure!(
+                serde_json::to_value(previous)? == serde_json::to_value(row)?,
+                "import would overwrite occurrence metadata"
+            );
+        }
+    }
+    let rows: Vec<_> = rows.into_values().collect();
+    repo.with_catalog(|catalog| catalog.insert_many(&rows))?;
+    Ok(rows.len())
+}
+
+/// Publish a portable active-metadata snapshot without reading payloads or replacing a file.
+pub fn export_jsonl(repo: &super::storage::Repository, output: &Path) -> Result<usize> {
+    crate::ingest::discovery::check_path(output)?;
+    ensure!(!output.try_exists()?, "metadata output already exists");
+    let parent = output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
+    let rows = load(repo.root())?;
+    for row in &rows {
+        serde_json::to_writer(&mut file, row)?;
+        file.write_all(b"\n")?;
+    }
+    file.as_file().sync_all()?;
+    file.persist_noclobber(output)?;
+    fs::File::open(parent)?.sync_all()?;
+    Ok(rows.len())
+}
+
 /// Load, validate, deduplicate, and deterministically order manifest records.
 pub fn load(root: &Path) -> Result<Vec<Occurrence>> {
+    select(root, &crate::selection::Filters::default())
+}
+
+/// Select effective metadata through bound SQL, including legacy repositories in memory.
+pub fn select(root: &Path, filters: &crate::selection::Filters) -> Result<Vec<Occurrence>> {
+    let _progress = crate::app::presentation::Progress::new(None, "Querying metadata");
+    super::catalog::read(root)?.select(filters, false)
+}
+
+/// Validated effective metadata including logically removed occurrences, for retained views.
+pub fn load_all(root: &Path) -> Result<Vec<Occurrence>> {
+    super::catalog::read(root)?.select(&crate::selection::Filters::default(), true)
+}
+
+/// Legacy JSONL reader used only for migration and explicit interchange.
+pub fn load_legacy(root: &Path) -> Result<Vec<Occurrence>> {
+    let _progress = crate::app::presentation::Progress::new(None, "Loading metadata");
     crate::ingest::discovery::check_path(&root.join("manifests"))?;
     let mut paths: Vec<_> = fs::read_dir(root.join("manifests"))?
         .map(|e| e.map(|e| e.path()))
@@ -202,11 +312,24 @@ pub fn reclassify(
         repo.mode() == SecurityMode::Standard,
         "analysis requires a standard repository; sealed payloads are never unlocked automatically"
     );
-    let mut records = load(repo.root())?;
+    let mut records = load_all(repo.root())?;
+    let removed = crate::repository::cleanup::removed(repo.root())?;
+    let total = records
+        .iter()
+        .filter(|r| !removed.contains(&r.occurrence_id))
+        .map(|r| &r.sha256)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+    let progress =
+        crate::app::presentation::Progress::new(Some(total as u64), "Reclassifying objects");
+    let mut reused = 0;
     let mut cache = BTreeMap::new();
     let checkpoint_dir = repo.root().join("reports/reclassification");
     security::private_dir(&checkpoint_dir)?;
     for record in &mut records {
+        if removed.contains(&record.occurrence_id) {
+            continue;
+        }
         ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
         if !cache.contains_key(&record.sha256) {
             let path = repo.object(&record.sha256)?;
@@ -240,6 +363,7 @@ pub fn reclassify(
                     "stale classification checkpoint"
                 );
                 cache.insert(record.sha256.clone(), detection);
+                reused += 1;
             } else {
                 let mut prefix = Vec::with_capacity(crate::detection::classifier::PREFIX_LIMIT);
                 Read::take(&mut file, crate::detection::classifier::PREFIX_LIMIT as u64)
@@ -254,11 +378,22 @@ pub fn reclassify(
             saved.as_file().sync_all()?;
             saved.persist(&checkpoint)?;
             fs::File::open(&checkpoint_dir)?.sync_all()?;
+            progress.0.inc(1);
+            progress.0.set_message(format!(
+                "completed {} / reused {reused}",
+                cache.len() - reused
+            ));
         }
         record.detection = cache[&record.sha256].clone();
         record.mismatch =
             crate::detection::mismatch::evaluate(&record.original_entry_name, &record.detection);
     }
+    drop(progress);
+    let publication = crate::app::presentation::Progress::new(
+        Some(records.len() as u64),
+        "Publishing classifications",
+    );
+    repo.with_catalog(|catalog| catalog.update_classifications(&records))?;
     let directory = repo.root().join("reports");
     let target = directory.join("classification.jsonl");
     crate::ingest::discovery::check_path(&target)?;
@@ -269,11 +404,13 @@ pub fn reclassify(
     for record in &records {
         serde_json::to_writer(&mut file, record)?;
         file.write_all(b"\n")?;
+        publication.0.inc(1);
     }
     file.as_file().sync_all()?;
     ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
     file.persist(target)?;
     fs::File::open(directory)?.sync_all()?;
+    drop(publication);
     let current = repo.root().join("views/CURRENT");
     crate::ingest::discovery::check_path(&current)?;
     let rules = if current.try_exists()? {
@@ -309,6 +446,7 @@ pub fn reclassify(
     } else {
         crate::organization::rules::Rules::load_or_preset(None, None)?
     };
+    records.retain(|r| !removed.contains(&r.occurrence_id));
     crate::organization::organizer::organize(repo, &rules, &rules.plan(&records)?)?;
     Ok(records.len())
 }

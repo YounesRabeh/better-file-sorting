@@ -5,7 +5,7 @@
 //! Uses synthetic inputs to exercise the library independently of normal CLI usage.
 //! Keep harness work isolated from user payloads and production repositories.
 
-use bfs::{
+use bfsort::{
     app::config::{Config, Security, SecurityMode},
     ingest::pipeline,
     organization::organizer,
@@ -98,7 +98,7 @@ fn main() -> anyhow::Result<()> {
                     .path()
                     .join(format!("repo-{scenario}-{mode:?}-{workers}"));
                 let mut config = Config {
-                    input_mode: bfs::app::config::InputMode::Archives,
+                    input_mode: bfsort::app::config::InputMode::Archives,
                     inputs: vec![input.clone()],
                     output: output.clone(),
                     workers,

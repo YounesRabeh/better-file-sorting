@@ -26,6 +26,102 @@ pub struct Cli {
 }
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Migrate repository metadata or exchange JSONL without copying payloads
+    Metadata {
+        #[command(subcommand)]
+        command: MetadataCommand,
+    },
+    /// Verify stored identities, references and object integrity without repairing
+    Verify {
+        #[arg(default_value = crate::app::config::DEFAULT_REPOSITORY)]
+        repository: PathBuf,
+        #[arg(long)]
+        full: bool,
+    },
+    /// Search effective occurrence metadata without opening payloads
+    Query {
+        #[arg(default_value = crate::app::config::DEFAULT_REPOSITORY)]
+        repository: PathBuf,
+        #[command(flatten)]
+        selection: crate::selection::Selection,
+        #[arg(short = 'c', long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        count: bool,
+    },
+    /// Compare unique content, occurrence counts and detection metadata
+    Diff { left: PathBuf, right: PathBuf },
+    /// Combine standard repositories into a new independent repository
+    Merge {
+        #[arg(required = true, num_args = 2..)]
+        repositories: Vec<PathBuf>,
+        #[arg(short = 'o', long)]
+        output: PathBuf,
+        #[command(flatten)]
+        selection: crate::selection::Selection,
+        #[arg(short = 'c', long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Select a reproducible subset into a new independent repository
+    Sample {
+        repository: PathBuf,
+        #[arg(long)]
+        count: usize,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        #[arg(short = 'o', long)]
+        output: PathBuf,
+        #[command(flatten)]
+        selection: crate::selection::Selection,
+        #[arg(short = 'c', long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Partition a standard repository into independent repositories
+    Split {
+        repository: PathBuf,
+        #[arg(long, value_enum)]
+        by: SplitBy,
+        #[arg(short = 'o', long)]
+        output: PathBuf,
+        #[command(flatten)]
+        selection: crate::selection::Selection,
+        #[arg(short = 'c', long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Show recorded operation history and current ownership
+    Status { root: PathBuf },
+    /// Retry a recorded operation through its verified resume path
+    Retry {
+        root: PathBuf,
+        #[arg(long)]
+        operation: String,
+    },
+    /// Logically remove selected occurrences; retained generations still pin data
+    Remove {
+        repository: PathBuf,
+        #[command(flatten)]
+        selection: crate::selection::Selection,
+        #[arg(short = 'c', long)]
+        config: Option<PathBuf>,
+        #[arg(long, conflicts_with = "confirm")]
+        dry_run: bool,
+        #[arg(long)]
+        confirm: bool,
+    },
+    /// Reclaim canonical objects unreferenced by retained metadata
+    Prune {
+        repository: PathBuf,
+        #[arg(long, conflicts_with = "confirm")]
+        dry_run: bool,
+        #[arg(long)]
+        confirm: bool,
+    },
     /// Discover if needed, select and download into sealed staging
     Collect(Collect),
     /// Validate configuration without processing inputs
@@ -43,6 +139,10 @@ pub enum Command {
     Inspect(Inspect),
     /// Summarize stored metadata without reading payloads
     Stats {
+        #[command(flatten)]
+        selection: crate::selection::Selection,
+        #[arg(short = 'c', long)]
+        config: Option<PathBuf>,
         /// Repository to summarize; defaults to ./organized
         #[arg(default_value = crate::app::config::DEFAULT_REPOSITORY)]
         repository: PathBuf,
@@ -81,6 +181,10 @@ pub enum Command {
     Export(Export),
     /// Build a new view from metadata without unlocking payloads
     Reorganize {
+        #[command(flatten)]
+        selection: crate::selection::Selection,
+        #[arg(short = 'c', long)]
+        config: Option<PathBuf>,
         #[arg(default_value = crate::app::config::DEFAULT_REPOSITORY)]
         repository: PathBuf,
         #[arg(long)]
@@ -93,6 +197,8 @@ pub enum Command {
 }
 #[derive(Debug, Args)]
 pub struct Ingest {
+    #[command(flatten)]
+    pub selection: crate::selection::Selection,
     /// Verify and reuse completed work from an earlier run
     #[arg(long)]
     pub resume: bool,
@@ -215,6 +321,9 @@ pub enum ColorMode {
 
 #[derive(Debug, Args)]
 pub struct Presentation {
+    /// Suppress progress while retaining normal command output
+    #[arg(long, global = true)]
+    pub no_progress: bool,
     #[arg(long, global = true, value_enum, default_value = "auto")]
     pub color: ColorMode,
     /// Disable color (takes precedence over --color)
@@ -237,6 +346,10 @@ pub enum ReportCommand {
 }
 #[derive(Debug, Args)]
 pub struct MismatchArgs {
+    #[command(flatten)]
+    pub selection: crate::selection::Selection,
+    #[arg(short = 'c', long)]
+    pub config: Option<PathBuf>,
     #[arg(default_value = crate::app::config::DEFAULT_REPOSITORY)]
     pub repository: PathBuf,
     #[arg(long, value_enum, default_value = "table")]
@@ -253,6 +366,10 @@ pub struct MismatchArgs {
 }
 #[derive(Debug, Args)]
 pub struct Export {
+    #[command(flatten)]
+    pub selection: crate::selection::Selection,
+    #[arg(short = 'c', long)]
+    pub config: Option<PathBuf>,
     /// Verify and reuse completed work from an earlier run
     #[arg(long)]
     pub resume: bool,
@@ -289,4 +406,24 @@ fn styles() -> clap::builder::Styles {
         .literal(AnsiColor::Green.on_default().bold())
         .placeholder(AnsiColor::Cyan.on_default())
         .error(AnsiColor::Red.on_default().bold())
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum SplitBy {
+    Extension,
+    Format,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MetadataCommand {
+    /// Atomically import a legacy repository into its private SQLite catalog
+    Migrate { repository: PathBuf },
+    /// Import validated JSONL occurrences; referenced objects must already exist
+    Import { repository: PathBuf, input: PathBuf },
+    /// Export active effective occurrences as private JSONL without replacing output
+    Export {
+        repository: PathBuf,
+        #[arg(short = 'o', long)]
+        output: PathBuf,
+    },
 }

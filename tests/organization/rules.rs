@@ -5,7 +5,7 @@
 //! Exercises public BFS behavior with disposable fixtures; failures should identify
 //! contract regressions without changing user repositories.
 
-use bfs::{organization::rules::Rules, repository::metadata::Occurrence};
+use bfsort::{organization::rules::Rules, repository::metadata::Occurrence};
 /// Build a deterministic occurrence fixture for rules tests.
 fn row(name: &str, id: char, hash: char) -> Occurrence {
     Occurrence {
@@ -13,7 +13,7 @@ fn row(name: &str, id: char, hash: char) -> Occurrence {
         detection: Default::default(),
         mismatch: Default::default(),
         provenance: None,
-        input_mode: bfs::app::config::InputMode::Archives,
+        input_mode: bfsort::app::config::InputMode::Archives,
         occurrence_id: id.to_string().repeat(64),
         sha256: hash.to_string().repeat(64),
         size: 3,
@@ -144,7 +144,7 @@ fn match_fields_ranges_and_unicode_normalization_are_consistent() {
 fn regular_names_keep_long_extensions_and_legacy_records_stay_samples() {
     let rules = Rules::parse("[organization]\nfilename_policy = 'regular'\nduplicates = 'all'\ndefault_filename = '{original_name}'").unwrap();
     let mut a = row(&format!("{}.txt", "é".repeat(100)), 'a', 'a');
-    a.input_mode = bfs::app::config::InputMode::Files;
+    a.input_mode = bfsort::app::config::InputMode::Files;
     let mut b = a.clone();
     b.occurrence_id = "b".repeat(64);
     let plan = rules.plan(&[a.clone(), b]).unwrap();
@@ -154,7 +154,7 @@ fn regular_names_keep_long_extensions_and_legacy_records_stay_samples() {
     let mut legacy = serde_json::to_value(a).unwrap();
     legacy.as_object_mut().unwrap().remove("input_mode");
     let legacy: Occurrence = serde_json::from_value(legacy).unwrap();
-    assert_eq!(legacy.input_mode, bfs::app::config::InputMode::Archives);
+    assert_eq!(legacy.input_mode, bfsort::app::config::InputMode::Archives);
     assert!(rules.plan(std::slice::from_ref(&legacy)).is_err());
     assert!(
         Rules::default().plan(&[legacy]).unwrap()[0]
@@ -173,7 +173,7 @@ fn regular_names_keep_long_extensions_and_legacy_records_stay_samples() {
 
 #[test]
 fn automatic_directory_keeps_ambiguity_legacy_and_unsafe_extensions_separate() {
-    use bfs::detection::classifier::{Confidence, Format};
+    use bfsort::detection::classifier::{Confidence, Format};
     let rules = Rules::parse(
         "[organization]\nduplicates = 'all'\ndefault_directory = '{format_or_extension}'",
     )

@@ -1,5 +1,5 @@
 use crate::common;
-use bfs::detection::classifier;
+use bfsort::detection::classifier;
 
 fn pe() -> Vec<u8> {
     let mut b = vec![0; 512];
@@ -98,15 +98,15 @@ fn zip_markers_are_structural_and_conflicts_are_ambiguous() {
         if expected != "ambiguous" {
             let filename = format!("fixture.{expected}");
             assert_eq!(
-                bfs::detection::mismatch::evaluate(&filename, &detection).status,
-                bfs::detection::mismatch::Status::Match
+                bfsort::detection::mismatch::evaluate(&filename, &detection).status,
+                bfsort::detection::mismatch::Status::Match
             );
         }
     }
 }
 #[test]
 fn extension_compatibility_is_conservative() {
-    use bfs::detection::mismatch::{Status, evaluate};
+    use bfsort::detection::mismatch::{Status, evaluate};
     let pe = classifier::detect(&pe());
     let elf = classifier::detect(&elf());
     let text = classifier::detect(b"ordinary text");
@@ -164,9 +164,10 @@ fn ingestion_reports_stats_rules_and_independent_exports() {
     );
     let records = common::manifest(&repo);
     assert_eq!(records.len(), 5);
-    assert!(records.iter().all(
-        |r| r["detection"]["detector_version"] == bfs::detection::classifier::DETECTOR_VERSION
-    ));
+    assert!(
+        records.iter().all(|r| r["detection"]["detector_version"]
+            == bfsort::detection::classifier::DETECTOR_VERSION)
+    );
     let report = common::run(&[
         "report".as_ref(),
         "mismatches".as_ref(),
@@ -245,6 +246,8 @@ fn legacy_defaults_and_explicit_analysis() {
         .status
         .success()
     );
+    // Convert this disposable exported snapshot into a pre-SQLite legacy fixture.
+    std::fs::remove_file(repo.join(bfsort::repository::catalog::FILE_NAME)).unwrap();
     for entry in std::fs::read_dir(repo.join("manifests")).unwrap() {
         let p = entry.unwrap().path();
         let text = std::fs::read_to_string(&p).unwrap();
@@ -253,14 +256,14 @@ fn legacy_defaults_and_explicit_analysis() {
         r.as_object_mut().unwrap().remove("mismatch");
         std::fs::write(p, format!("{r}\n")).unwrap();
     }
-    let records = bfs::repository::metadata::load(&repo).unwrap();
+    let records = bfsort::repository::metadata::load(&repo).unwrap();
     assert_eq!(
         records[0].detection.detected_format,
         classifier::Format::NotEvaluated
     );
     assert_eq!(
         records[0].mismatch.status,
-        bfs::detection::mismatch::Status::NotEvaluated
+        bfsort::detection::mismatch::Status::NotEvaluated
     );
     let result = common::run(&["reclassify".as_ref(), repo.as_os_str()]);
     assert!(
@@ -269,10 +272,10 @@ fn legacy_defaults_and_explicit_analysis() {
         String::from_utf8_lossy(&result.stderr)
     );
     assert_eq!(
-        bfs::repository::metadata::load(&repo).unwrap()[0]
+        bfsort::repository::metadata::load(&repo).unwrap()[0]
             .mismatch
             .status,
-        bfs::detection::mismatch::Status::Mismatch
+        bfsort::detection::mismatch::Status::Mismatch
     );
 }
 
@@ -358,7 +361,7 @@ fn remaining_signatures_and_random_inputs_are_bounded() {
         let mut cursor = std::io::Cursor::new(&b);
         let _ = classifier::detect_reader(&b, &mut cursor);
         let name = String::from_utf8_lossy(&b);
-        let _ = bfs::detection::mismatch::evaluate(&name, &detection);
+        let _ = bfsort::detection::mismatch::evaluate(&name, &detection);
     }
 }
 
@@ -410,23 +413,23 @@ fn large_zip_uses_bounded_directory_reads_and_generic_zip_is_uncertain() {
     assert_eq!(detection.detected_format, classifier::Format::Docx);
     assert!(meter.bytes < 70000, "{}", meter.bytes);
     assert_eq!(
-        bfs::detection::mismatch::evaluate("a.docx", &detection).status,
-        bfs::detection::mismatch::Status::Match
+        bfsort::detection::mismatch::evaluate("a.docx", &detection).status,
+        bfsort::detection::mismatch::Status::Match
     );
     assert_eq!(
-        bfs::detection::mismatch::evaluate("a.zip", &detection).status,
-        bfs::detection::mismatch::Status::Compatible
+        bfsort::detection::mismatch::evaluate("a.zip", &detection).status,
+        bfsort::detection::mismatch::Status::Compatible
     );
     let mut generic = classifier::detect(b"PK\x03\x04");
     generic.confidence = classifier::Confidence::High;
     assert_eq!(
-        bfs::detection::mismatch::evaluate("a.docx", &generic).status,
-        bfs::detection::mismatch::Status::Ambiguous
+        bfsort::detection::mismatch::evaluate("a.docx", &generic).status,
+        bfsort::detection::mismatch::Status::Ambiguous
     );
-    assert_eq!(bfs::detection::mismatch::extension("a.PDF.EXE"), "exe");
-    assert_eq!(bfs::detection::mismatch::extension("a.TAR.GZ"), "tar.gz");
+    assert_eq!(bfsort::detection::mismatch::extension("a.PDF.EXE"), "exe");
+    assert_eq!(bfsort::detection::mismatch::extension("a.TAR.GZ"), "tar.gz");
     assert_eq!(
-        bfs::detection::mismatch::normalize_extension("..JPEG"),
+        bfsort::detection::mismatch::normalize_extension("..JPEG"),
         "jpeg"
     );
 }
@@ -524,27 +527,27 @@ fn report_escaping_filtering_and_new_rule_matchers() {
     let repo = t.path().join("repo");
     common::archive(&input, &[("comma,quote\".pdf", &pe()), ("good.exe", &pe())]);
     assert!(common::ingest(&input, &repo, "2").status.success());
-    let records = bfs::repository::metadata::load(&repo).unwrap();
+    let records = bfsort::repository::metadata::load(&repo).unwrap();
     let report =
-        bfs::output::report::mismatches(&records, &[], classifier::Confidence::High, false);
+        bfsort::output::report::mismatches(&records, &[], classifier::Confidence::High, false);
     let mut csv = vec![];
     report
-        .write(&mut csv, bfs::output::report::ReportFormat::Csv)
+        .write(&mut csv, bfsort::output::report::ReportFormat::Csv)
         .unwrap();
     assert!(
         String::from_utf8(csv)
             .unwrap()
             .contains("\"comma,quote\"\".pdf\"")
     );
-    let report = bfs::output::report::mismatches(
+    let report = bfsort::output::report::mismatches(
         &records,
-        &[bfs::detection::mismatch::Status::Match],
+        &[bfsort::detection::mismatch::Status::Match],
         classifier::Confidence::High,
         false,
     );
     assert_eq!(report.rows.len(), 1);
     assert_eq!(report.rows[0].original_entry_name, "good.exe");
-    let rules = bfs::organization::rules::Rules::parse("[[rules]]\nname='mismatch'\n[rules.match]\ndetected_format='pe'\nmismatch_status='mismatch'\n[rules.output]\ndirectory='{detected_family}/{detected_format}/{mismatch_status}'\nfilename='{sha256}.sample'\n[organization]\nduplicates='all'\n").unwrap();
+    let rules = bfsort::organization::rules::Rules::parse("[[rules]]\nname='mismatch'\n[rules.match]\ndetected_format='pe'\nmismatch_status='mismatch'\n[rules.output]\ndirectory='{detected_family}/{detected_format}/{mismatch_status}'\nfilename='{sha256}.sample'\n[organization]\nduplicates='all'\n").unwrap();
     assert!(
         rules
             .plan(&records)
@@ -588,23 +591,23 @@ fn export_trusts_persisted_metadata_and_never_rehashes_or_reclassifies() {
         .success()
     );
     std::fs::remove_file(input).unwrap();
-    let repo = bfs::repository::storage::Repository::existing(&root).unwrap();
-    let records = bfs::repository::metadata::load(&root).unwrap();
+    let repo = bfsort::repository::storage::Repository::existing(&root).unwrap();
+    let records = bfsort::repository::metadata::load(&root).unwrap();
     let pointer = std::fs::read(root.join("views/CURRENT")).unwrap();
     let manifest = common::manifest(&root);
     // Deliberately violate storage integrity to prove export uses neither hashing nor detection.
     let bytes = vec![0xff; records[0].size as usize];
     std::fs::write(repo.object(&records[0].sha256).unwrap(), &bytes).unwrap();
-    let config = bfs::app::config::Config {
+    let config = bfsort::app::config::Config {
         zip: true,
         output: t.path().join("out.zip"),
         ..Default::default()
     };
-    let rules = bfs::organization::rules::Rules::parse(
+    let rules = bfsort::organization::rules::Rules::parse(
         "[organization]\ndefault_directory='{detected_format}'\n",
     )
     .unwrap();
-    bfs::output::archive::export_repository(
+    bfsort::output::archive::export_repository(
         &repo,
         &rules,
         &config,
@@ -635,8 +638,8 @@ fn prose_and_indented_examples_are_not_definitive_mismatches() {
         let d = classifier::detect(bytes);
         assert_eq!(d.detected_format, classifier::Format::Text);
         assert_ne!(
-            bfs::detection::mismatch::evaluate(name, &d).status,
-            bfs::detection::mismatch::Status::Mismatch
+            bfsort::detection::mismatch::evaluate(name, &d).status,
+            bfsort::detection::mismatch::Status::Mismatch
         );
     }
 }
@@ -679,7 +682,7 @@ fn container_and_image_pdf_conflicts_are_ambiguous() {
 
 #[test]
 fn expanded_formats_require_structural_headers_and_decode_utf16() {
-    use bfs::detection::classifier::detect;
+    use bfsort::detection::classifier::detect;
     let mut dex = vec![0u8; 112];
     dex[..8].copy_from_slice(b"dex\n035\0");
     dex[32..36].copy_from_slice(&112u32.to_le_bytes());
@@ -715,7 +718,7 @@ fn expanded_formats_require_structural_headers_and_decode_utf16() {
 
 #[test]
 fn cfb_subtypes_are_bounded_and_loops_remain_generic() {
-    use bfs::detection::classifier::detect_reader;
+    use bfsort::detection::classifier::detect_reader;
     let mut b = vec![0u8; 1536];
     b[..8].copy_from_slice(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1");
     b[26..28].copy_from_slice(&3u16.to_le_bytes());
@@ -751,7 +754,7 @@ fn cfb_subtypes_are_bounded_and_loops_remain_generic() {
 
 #[test]
 fn expanded_archive_headers_and_universal_macho_check_file_bounds() {
-    use bfs::detection::classifier::{detect, detect_reader};
+    use bfsort::detection::classifier::{detect, detect_reader};
     let mut fat = vec![0; 28];
     fat[..4].copy_from_slice(b"\xca\xfe\xba\xbe");
     fat[4..8].copy_from_slice(&1u32.to_be_bytes());
@@ -815,7 +818,7 @@ fn cab_rejects_missing_folder_table() {
     cab[25] = 1;
     cab[26] = 1;
     assert_ne!(
-        bfs::detection::classifier::detect(&cab)
+        bfsort::detection::classifier::detect(&cab)
             .detected_format
             .as_str(),
         "cab"

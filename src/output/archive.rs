@@ -240,6 +240,8 @@ fn publish(
 ) -> Result<()> {
     use std::io::{Read, Write};
     use std::sync::atomic::Ordering;
+    let progress =
+        crate::app::presentation::Progress::new(Some(plan.len() as u64), "Exporting ZIP entries");
     check_path(output)?;
     let parent = output
         .parent()
@@ -274,7 +276,9 @@ fn publish(
             }
             zip.write_all(&buffer[..count])?;
         }
+        progress.0.inc(1);
     }
+    progress.0.set_message("publishing ZIP metadata");
     zip.start_file("layout.jsonl", options)?;
     for entry in plan {
         serde_json::to_writer(&mut zip, entry)?;
@@ -327,9 +331,11 @@ pub fn export_repository(
     dry_run: bool,
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> Result<Vec<ZipExport>> {
-    let records = crate::repository::metadata::load(repo.root())?;
+    let records = crate::repository::metadata::select(repo.root(), &config.filters)?;
+    let planning = crate::app::presentation::Progress::new(None, "Planning ZIP exports");
     let plan = rules.plan(&records)?;
     let mut exports = plan_exports(&plan, config, rules)?;
+    drop(planning);
     let existing: BTreeSet<_> = if config.resume {
         exports
             .iter()
@@ -377,6 +383,7 @@ struct ExportCheckpoint {
     completed: bool,
 }
 fn archive_digest(path: &Path, cancelled: &std::sync::atomic::AtomicBool) -> Result<ExportReceipt> {
+    let _progress = crate::app::presentation::Progress::new(None, "Verifying ZIP checksum");
     use sha2::{Digest, Sha256};
     use std::io::Read;
     crate::repository::security::validate_file(path, crate::app::config::SecurityMode::Standard)?;
@@ -585,6 +592,8 @@ fn verify_export_layout(
 ) -> Result<()> {
     use sha2::{Digest, Sha256};
     use std::io::Read;
+    let progress =
+        crate::app::presentation::Progress::new(Some(plan.len() as u64), "Verifying ZIP entries");
     verify_export_password(path, password)?;
     let mut archive = ZipArchive::new(File::open(path)?)?;
     ensure!(
@@ -623,6 +632,7 @@ fn verify_export_layout(
             digest == entry.sha256,
             "uncheckpointed export content mismatch"
         );
+        progress.0.inc(1);
     }
     let layout = if let Some(password) = password {
         archive.by_name_decrypt("layout.jsonl", password.as_bytes())?

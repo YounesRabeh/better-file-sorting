@@ -1,0 +1,177 @@
+//! Shared metadata selection; organization rules remain responsible for destinations.
+use crate::{
+    detection::{classifier::Format, mismatch::Status},
+    repository::metadata::Occurrence,
+};
+use anyhow::{Result, ensure};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Filters {
+    pub include_extensions: Vec<String>,
+    pub exclude_extensions: Vec<String>,
+    pub include_formats: Vec<Format>,
+    pub exclude_formats: Vec<Format>,
+    pub sha256: Option<String>,
+    pub mismatch: Option<Status>,
+    pub min_size: Option<u64>,
+    pub max_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, clap::Args)]
+pub struct Selection {
+    #[arg(long, value_delimiter = ',')]
+    pub include_ext: Vec<String>,
+    #[arg(long, value_delimiter = ',')]
+    pub exclude_ext: Vec<String>,
+    #[arg(long, value_delimiter = ',', value_parser = parse_format)]
+    pub include_format: Vec<Format>,
+    #[arg(long, value_delimiter = ',', value_parser = parse_format)]
+    pub exclude_format: Vec<Format>,
+    #[arg(long)]
+    pub sha256: Option<String>,
+    #[arg(long, value_enum)]
+    pub mismatch: Option<Status>,
+    /// Inclusive minimum size in bytes
+    #[arg(long)]
+    pub min_size: Option<u64>,
+    /// Inclusive maximum size in bytes
+    #[arg(long)]
+    pub max_size: Option<u64>,
+}
+
+fn parse_format(value: &str) -> std::result::Result<Format, String> {
+    serde_json::from_value(serde_json::Value::String(value.to_owned()))
+        .map_err(|_| format!("unsupported detected format: {value}"))
+}
+
+impl Selection {
+    pub fn resolve(&self, mut base: Filters) -> Result<Filters> {
+        for (cli, configured) in [
+            (&self.include_ext, &mut base.include_extensions),
+            (&self.exclude_ext, &mut base.exclude_extensions),
+        ] {
+            if !cli.is_empty() {
+                configured.clone_from(cli);
+            }
+        }
+        if !self.include_format.is_empty() {
+            base.include_formats.clone_from(&self.include_format);
+        }
+        if !self.exclude_format.is_empty() {
+            base.exclude_formats.clone_from(&self.exclude_format);
+        }
+        if self.sha256.is_some() {
+            base.sha256.clone_from(&self.sha256);
+        }
+        if self.mismatch.is_some() {
+            base.mismatch = self.mismatch;
+        }
+        if self.min_size.is_some() {
+            base.min_size = self.min_size;
+        }
+        if self.max_size.is_some() {
+            base.max_size = self.max_size;
+        }
+        base.validate()?;
+        Ok(base)
+    }
+}
+
+impl Filters {
+    pub fn validate(&self) -> Result<()> {
+        for extension in self
+            .include_extensions
+            .iter()
+            .chain(&self.exclude_extensions)
+        {
+            let extension = extension.strip_prefix('.').unwrap_or(extension);
+            ensure!(
+                !extension.is_empty()
+                    && !extension.chars().any(|c| c.is_whitespace()
+                        || c.is_control()
+                        || matches!(c, '/' | '\\' | ',' | '.')),
+                "invalid extension filter"
+            );
+        }
+        ensure!(
+            self.min_size.unwrap_or(0) <= self.max_size.unwrap_or(u64::MAX),
+            "minimum size exceeds maximum size"
+        );
+        ensure!(
+            self.sha256
+                .as_ref()
+                .is_none_or(|h| crate::repository::storage::valid_hash(h)),
+            "invalid SHA-256 filter"
+        );
+        Ok(())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.include_extensions.is_empty()
+            && self.exclude_extensions.is_empty()
+            && self.include_formats.is_empty()
+            && self.exclude_formats.is_empty()
+            && self.sha256.is_none()
+            && self.mismatch.is_none()
+            && self.min_size.is_none()
+            && self.max_size.is_none()
+    }
+
+    pub fn matches(&self, row: &Occurrence) -> bool {
+        let ext = crate::detection::mismatch::normalize_extension(&row.original_extension);
+        let extension_matches =
+            |value: &String| crate::detection::mismatch::normalize_extension(value) == ext;
+        (self.include_extensions.is_empty()
+            || self.include_extensions.iter().any(extension_matches))
+            && !self.exclude_extensions.iter().any(extension_matches)
+            && (self.include_formats.is_empty()
+                || self
+                    .include_formats
+                    .contains(&row.detection.detected_format))
+            && !self
+                .exclude_formats
+                .contains(&row.detection.detected_format)
+            && self.sha256.as_ref().is_none_or(|hash| hash == &row.sha256)
+            && self
+                .mismatch
+                .is_none_or(|status| status == row.mismatch.status)
+            && self.min_size.is_none_or(|size| row.size >= size)
+            && self.max_size.is_none_or(|size| row.size <= size)
+    }
+
+    pub fn retain(&self, rows: &mut Vec<Occurrence>) {
+        rows.retain(|r| self.matches(r));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cli_replaces_lists_and_exclusions_remain() {
+        let selection = Selection {
+            include_ext: vec![".PDF".into()],
+            ..Default::default()
+        };
+        let filters = selection
+            .resolve(Filters {
+                include_extensions: vec!["txt".into()],
+                exclude_extensions: vec!["exe".into()],
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(filters.include_extensions, [".PDF"]);
+        assert_eq!(filters.exclude_extensions, ["exe"]);
+        assert!(
+            Filters {
+                include_extensions: vec!["".into()],
+                ..Default::default()
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(parse_format("invalid").is_err());
+    }
+}

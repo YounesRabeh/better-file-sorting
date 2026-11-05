@@ -18,6 +18,7 @@ pub struct Repository {
     root: PathBuf,
     mode: SecurityMode,
     _lock: File,
+    catalog: std::sync::Mutex<Option<super::catalog::Catalog>>,
 }
 /// Return whether a string is a lowercase hexadecimal SHA-256 identity.
 pub fn valid_hash(hash: &str) -> bool {
@@ -76,6 +77,7 @@ impl Repository {
             root: root.canonicalize()?,
             mode,
             _lock: lock,
+            catalog: std::sync::Mutex::new(None),
         })
     }
     /// Open an existing repository without changing its recorded security mode.
@@ -112,7 +114,22 @@ impl Repository {
             root: root.canonicalize()?,
             mode,
             _lock: lock,
+            catalog: std::sync::Mutex::new(None),
         })
+    }
+    /// Serialize catalog writes alongside the existing repository writer lock.
+    pub fn with_catalog<T>(
+        &self,
+        update: impl FnOnce(&mut super::catalog::Catalog) -> Result<T>,
+    ) -> Result<T> {
+        let mut catalog = self
+            .catalog
+            .lock()
+            .map_err(|_| anyhow::anyhow!("catalog lock poisoned"))?;
+        if catalog.is_none() {
+            *catalog = Some(super::catalog::write(&self.root)?);
+        }
+        update(catalog.as_mut().expect("initialized catalog"))
     }
     /// Return the canonical repository root.
     pub fn root(&self) -> &Path {
@@ -151,5 +168,35 @@ impl Repository {
         );
         File::open(target.parent().expect("object parent"))?.sync_all()?;
         Ok(())
+    }
+}
+
+impl Drop for Repository {
+    fn drop(&mut self) {
+        drop(
+            self.catalog
+                .get_mut()
+                .unwrap_or_else(|p| p.into_inner())
+                .take(),
+        );
+        // Release ownership even if a forked child briefly retains a duplicate descriptor.
+        let _ = self._lock.unlock();
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    #[test]
+    fn dropping_repository_releases_lock_even_with_inherited_handle() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("repo");
+        let repo = Repository::open(&path, SecurityMode::Standard).unwrap();
+        // A concurrently forked subprocess can briefly retain the same open file description.
+        let inherited = repo._lock.try_clone().unwrap();
+        drop(repo);
+        let reopened = Repository::existing(&path);
+        assert!(reopened.is_ok());
+        drop(inherited);
     }
 }

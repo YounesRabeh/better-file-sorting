@@ -12,19 +12,24 @@ fn storage_fails_closed_without_acl_backend() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("repo");
     assert!(
-        bfs::repository::storage::Repository::open(&root, bfs::app::config::SecurityMode::Sealed)
-            .is_err()
+        bfsort::repository::storage::Repository::open(
+            &root,
+            bfsort::app::config::SecurityMode::Sealed
+        )
+        .is_err()
     );
     assert!(!root.exists());
 }
 #[test]
 /// Ensure shipped example configuration files remain parseable.
 fn example_configuration_and_rules_are_valid() {
-    let config: bfs::app::config::Config =
+    let config: bfsort::app::config::Config =
         toml::from_str(include_str!("../../examples/config.example.toml")).unwrap();
     config.validate().unwrap();
-    bfs::organization::rules::Rules::parse(include_str!("../../examples/rules.example.toml"))
+    bfsort::organization::rules::Rules::parse(include_str!("../../examples/rules.example.toml"))
         .unwrap();
-    bfs::organization::rules::Rules::parse(include_str!("../../examples/rules.files.example.toml"))
-        .unwrap();
+    bfsort::organization::rules::Rules::parse(include_str!(
+        "../../examples/rules.files.example.toml"
+    ))
+    .unwrap();
 }

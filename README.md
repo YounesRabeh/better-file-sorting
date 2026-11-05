@@ -32,6 +32,8 @@
 `bfsort` sorts ordinary files and mixed ZIP collections using detected content,
 original extensions or filename/content agreement. It keeps source provenance,
 deduplicates repository objects and exports independent portable ZIP collections.
+A private SQLite catalog stores metadata and relationships; payloads remain in
+the existing SHA-256 object directories.
 
 - Embedded `by-format`, `by-format-or-extension`, `by-extension` and `by-mismatch` presets.
 - Precise content detection with explicit unknown/ambiguous results.
@@ -39,6 +41,8 @@ deduplicates repository objects and exports independent portable ZIP collections
 - Nested ZIP extraction with parent provenance and reusable extraction receipts.
 - Existing-repository analysis and resumable reclassification.
 - Archive-level ingestion resume and per-ZIP export recovery.
+- Metadata queries and filtering, repository verification, diff, merge, split and seeded sampling.
+- Operation history/retry, explicit occurrence removal and conservative orphan pruning.
 - Readable terminal summaries and clean JSON/JSONL/CSV output.
 - Optional resource budgets and deadlines, protected storage and cancellation.
 
@@ -87,7 +91,7 @@ Use `bfsort --help` and `bfsort COMMAND --help` for options. `ingest` is the sin
 primary ingestion command; the former `organize` alias is removed. `discover`
 and `download` provide separate acquisition controls. `reorganize` builds a
 repository view; `export` creates independent ZIP outputs. The executable is
-lowercase `bfsort`; the internal Rust crate remains `bfs`.
+lowercase `bfsort`; the Rust library crate is also `bfsort`.
 
 ## Showcase
 
@@ -96,7 +100,8 @@ work/
 ├── collection/                    Original downloaded ZIPs and receipts
 ├── repository/
 │   ├── objects/                   Unique unpacked payloads
-│   ├── manifests/                 Occurrence metadata and provenance
+│   ├── metadata.sqlite3           Authoritative metadata and relationships
+│   ├── manifests/                 JSONL compatibility snapshots
 │   ├── views/                     Rule-generated hard links or layout indexes
 │   └── operations/                Resume checkpoints
 └── exports/
@@ -108,7 +113,9 @@ work/
 Actual directories depend on selected rules and nonempty categories. Presets
 retain every source occurrence; duplicate content can appear multiple times in
 exports. Each ZIP includes a versioned header, layout index and full portable
-occurrence manifest. Merge and split commands are not implemented.
+occurrence manifest. Merge, split and reproducible sampling create independent
+repositories; see [repository tools](docs/repository-tools.md).
+For legacy migration and JSONL interchange, see [SQLite metadata](docs/sqlite.md).
 
 ## Storage and security
 

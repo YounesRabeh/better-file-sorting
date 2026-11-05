@@ -1,6 +1,6 @@
 #![cfg(unix)]
 use crate::common;
-use bfs::{
+use bfsort::{
     app::config::{Config, InputMode, SecurityMode},
     ingest::pipeline,
 };
@@ -75,7 +75,7 @@ fn resume_invalidates_limits_and_checks_canonical_content() {
         pipeline::ingest(&config, &cancelled).unwrap().skipped_files,
         1
     );
-    let hash = bfs::repository::metadata::digest(b"hello");
+    let hash = bfsort::repository::metadata::digest(b"hello");
     let object = config.output.join("objects").join(&hash[..2]).join(hash);
     std::fs::write(object, b"xxxxx").unwrap();
     let result = pipeline::ingest(&config, &cancelled).unwrap();
@@ -98,7 +98,7 @@ fn resume_sealed_objects_remain_sealed_and_direct_zip_is_rejected() {
         pipeline::ingest(&config, &cancelled).unwrap().skipped_files,
         1
     );
-    let hash = bfs::repository::metadata::digest(b"hello");
+    let hash = bfsort::repository::metadata::digest(b"hello");
     let object = config.output.join("objects").join(&hash[..2]).join(hash);
     assert_eq!(
         std::fs::metadata(object).unwrap().permissions().mode() & 0o777,
@@ -174,7 +174,7 @@ fn encrypted_completed_input_skips_without_persisting_password_identity() {
         .path();
     let checkpoint = std::fs::read_to_string(path).unwrap();
     assert!(!checkpoint.contains("fixture-secret"));
-    assert!(!checkpoint.contains(&bfs::repository::metadata::digest(b"fixture-secret")));
+    assert!(!checkpoint.contains(&bfsort::repository::metadata::digest(b"fixture-secret")));
 }
 
 #[test]

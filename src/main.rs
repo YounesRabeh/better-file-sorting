@@ -7,7 +7,7 @@
 //! consume reports without mixing them with progress and error messages.
 
 use anyhow::Result;
-use bfs::{
+use bfsort::{
     app::cli::{Cli, Command},
     app::config::Config,
 };
@@ -15,11 +15,230 @@ use clap::{CommandFactory, FromArgMatches};
 /// Dispatch one parsed CLI command and return its process exit code.
 fn run(cli: Cli) -> Result<u8> {
     let ui = &cli.presentation;
-    bfs::app::presentation::initialize(ui);
+    bfsort::app::presentation::initialize(ui);
     let started = std::time::Instant::now();
     match cli.command {
+        Command::Metadata { command } => {
+            use bfsort::app::cli::MetadataCommand;
+            let (kind, count) = match command {
+                MetadataCommand::Migrate { repository } => {
+                    let repo = bfsort::repository::storage::Repository::existing(&repository)?;
+                    let count = repo.with_catalog(|catalog| {
+                        Ok(catalog.counts(&Default::default())?.occurrences)
+                    })?;
+                    ("Migrated", count)
+                }
+                MetadataCommand::Import { repository, input } => {
+                    let repo = bfsort::repository::storage::Repository::existing(&repository)?;
+                    (
+                        "Imported",
+                        bfsort::repository::metadata::import_jsonl(&repo, &input)? as u64,
+                    )
+                }
+                MetadataCommand::Export {
+                    repository,
+                    output: destination,
+                } => {
+                    let repo = bfsort::repository::storage::Repository::existing(&repository)?;
+                    (
+                        "Exported",
+                        bfsort::repository::metadata::export_jsonl(&repo, &destination)? as u64,
+                    )
+                }
+            };
+            output(
+                ui,
+                &serde_json::json!({"operation":kind,"occurrences":count}),
+                &format!("{kind}: {count} occurrences"),
+            )?;
+            Ok(0)
+        }
+        Command::Verify { repository, full } => {
+            let report =
+                bfsort::repository::verify::run(&repository, full, cancellation()?.as_ref())?;
+            output(ui, &report, &report.summary)?;
+            Ok(if report.failures.is_empty() { 0 } else { 1 })
+        }
+        Command::Query {
+            repository,
+            selection,
+            config,
+            count,
+        } => {
+            let repo = bfsort::repository::storage::Repository::existing(&repository)?;
+            let selected = filters(&selection, config.as_deref(), ui)?;
+            if count {
+                let counts = bfsort::repository::catalog::read(repo.root())?.counts(&selected)?;
+                output(
+                    ui,
+                    &counts,
+                    &format!(
+                        "{} occurrences; {} unique objects",
+                        counts.occurrences, counts.unique_objects
+                    ),
+                )?;
+                return Ok(0);
+            }
+            let records = bfsort::repository::metadata::select(repo.root(), &selected)?;
+            let unique = records
+                .iter()
+                .map(|r| &r.sha256)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len();
+            let value = serde_json::json!({"occurrences":records.len(),"unique_objects":unique,"rows":records});
+            let human = records
+                .iter()
+                .map(|r| {
+                    format!(
+                        "{}  {}  {}",
+                        r.sha256,
+                        r.detection.detected_format.as_str(),
+                        bfsort::app::presentation::safe_text(&r.original_entry_name)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            output(ui, &value, &human)?;
+            Ok(0)
+        }
+        Command::Diff { left, right } => {
+            let report = bfsort::repository::compare::run(&left, &right)?;
+            output(ui, &report, &serde_json::to_string_pretty(&report)?)?;
+            Ok(0)
+        }
+        Command::Merge {
+            repositories,
+            output: destination,
+            selection,
+            config,
+            dry_run,
+        } => derived(
+            ui,
+            repositories,
+            destination,
+            bfsort::repository::derive::Kind::Merge,
+            selection,
+            config,
+            dry_run,
+        ),
+        Command::Sample {
+            repository,
+            count,
+            seed,
+            output: destination,
+            selection,
+            config,
+            dry_run,
+        } => derived(
+            ui,
+            vec![repository],
+            destination,
+            bfsort::repository::derive::Kind::Sample { count, seed },
+            selection,
+            config,
+            dry_run,
+        ),
+        Command::Split {
+            repository,
+            by,
+            output: destination,
+            selection,
+            config,
+            dry_run,
+        } => {
+            let by = match by {
+                bfsort::app::cli::SplitBy::Extension => {
+                    bfsort::repository::derive::SplitBy::Extension
+                }
+                bfsort::app::cli::SplitBy::Format => bfsort::repository::derive::SplitBy::Format,
+            };
+            derived(
+                ui,
+                vec![repository],
+                destination,
+                bfsort::repository::derive::Kind::Split { by },
+                selection,
+                config,
+                dry_run,
+            )
+        }
+        Command::Status { root } => {
+            let report = bfsort::operations::status(&root)?;
+            output(ui, &report, &serde_json::to_string_pretty(&report)?)?;
+            Ok(0)
+        }
+        Command::Retry { root, operation } => {
+            let records = bfsort::operations::status(&root)?;
+            let record = records
+                .iter()
+                .find(|r| r.id == operation)
+                .ok_or_else(|| anyhow::anyhow!("operation not found"))?;
+            let mut recorded = bfsort::operations::retry_arguments(&root, &operation)?.into_iter();
+            let mut args = Vec::new();
+            while let Some(arg) = recorded.next() {
+                match arg.as_str() {
+                    "--color" => {
+                        recorded.next();
+                    }
+                    "--json" | "--quiet" | "--verbose" | "--no-progress" | "--no-color" => {}
+                    _ if arg.starts_with("--color=") => {}
+                    _ => args.push(arg),
+                }
+            }
+            let mut child = std::process::Command::new(std::env::current_exe()?);
+            child
+                .args(args)
+                .env("BFSORT_RETRY_OF", &operation)
+                .current_dir(&record.cwd);
+            for (enabled, flag) in [
+                (ui.json, "--json"),
+                (ui.quiet, "--quiet"),
+                (ui.verbose, "--verbose"),
+                (ui.no_progress, "--no-progress"),
+                (ui.no_color, "--no-color"),
+            ] {
+                if enabled {
+                    child.arg(flag);
+                }
+            }
+            child.args([
+                "--color",
+                match ui.color {
+                    bfsort::app::cli::ColorMode::Auto => "auto",
+                    bfsort::app::cli::ColorMode::Always => "always",
+                    bfsort::app::cli::ColorMode::Never => "never",
+                },
+            ]);
+            let status = child.status()?;
+            Ok(status.code().unwrap_or(1).try_into().unwrap_or(1))
+        }
+        Command::Remove {
+            repository,
+            selection,
+            config,
+            dry_run,
+            confirm,
+        } => {
+            let report = bfsort::repository::cleanup::remove(
+                &repository,
+                &filters(&selection, config.as_deref(), ui)?,
+                dry_run,
+                confirm,
+            )?;
+            output(ui, &report, &serde_json::to_string_pretty(&report)?)?;
+            Ok(0)
+        }
+        Command::Prune {
+            repository,
+            dry_run,
+            confirm,
+        } => {
+            let report = bfsort::repository::cleanup::prune(&repository, dry_run, confirm)?;
+            output(ui, &report, &serde_json::to_string_pretty(&report)?)?;
+            Ok(0)
+        }
         Command::Config {
-            command: bfs::app::cli::ConfigCommand::Validate { config },
+            command: bfsort::app::cli::ConfigCommand::Validate { config },
         } => {
             let config = load(config.as_deref(), ui)?;
             config.validate()?;
@@ -46,21 +265,26 @@ fn run(cli: Cli) -> Result<u8> {
             }
             download.validate()?;
             let cancelled = cancellation()?;
+            let mut history = if args.dry_run {
+                None
+            } else {
+                Some(history(collection_root(&download), "collect")?)
+            };
             let inventory = if args.refresh || !download.inventory.try_exists()? {
                 if args.dry_run && !ui.quiet && !ui.json {
                     eprintln!("Preview: requesting HTML metadata; no payloads will be downloaded.");
                 }
                 let inventory =
-                    bfs::collection::http_source::discover(&source, &download, &cancelled)?;
+                    bfsort::collection::http_source::discover(&source, &download, &cancelled)?;
                 // A dry run never publishes acquisition state or creates payload storage.
                 if !args.dry_run {
                     save_inventory(&download, &inventory)?;
                 }
                 inventory
             } else {
-                bfs::collection::acquisition::load_inventory(&download.inventory)?
+                bfsort::collection::acquisition::load_inventory(&download.inventory)?
             };
-            download_inventory(
+            let result = download_inventory(
                 ui,
                 &download,
                 source,
@@ -68,7 +292,15 @@ fn run(cli: Cli) -> Result<u8> {
                 args.dry_run,
                 &cancelled,
                 started,
-            )
+            );
+            if let Some(history) = &mut history {
+                history.finish(if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                    130
+                } else {
+                    *result.as_ref().unwrap_or(&1)
+                })?;
+            }
+            result
         }
         Command::Discover(args) => {
             anyhow::ensure!(
@@ -82,7 +314,8 @@ fn run(cli: Cli) -> Result<u8> {
             }
             let download = config.download.unwrap_or_default();
             let cancelled = cancellation()?;
-            let inventory = bfs::collection::http_source::discover(&source, &download, &cancelled)?;
+            let inventory =
+                bfsort::collection::http_source::discover(&source, &download, &cancelled)?;
             save_inventory(&download, &inventory)?;
             let files: Vec<_> = inventory.candidates.iter().map(|c| &c.name).collect();
             if ui.json && !ui.quiet {
@@ -92,7 +325,7 @@ fn run(cli: Cli) -> Result<u8> {
                 );
             } else if !ui.quiet {
                 for name in files {
-                    println!("{}", bfs::app::presentation::safe_text(name));
+                    println!("{}", bfsort::app::presentation::safe_text(name));
                 }
             }
             Ok(0)
@@ -100,20 +333,34 @@ fn run(cli: Cli) -> Result<u8> {
         Command::Download(args) => {
             let config = load(args.config.as_deref(), ui)?;
             let download = config.download.unwrap_or_default();
-            let inventory = bfs::collection::acquisition::load_inventory(&download.inventory)?;
-            download_inventory(
+            let inventory = bfsort::collection::acquisition::load_inventory(&download.inventory)?;
+            let mut history = if args.dry_run {
+                None
+            } else {
+                Some(history(collection_root(&download), "download")?)
+            };
+            let cancelled = cancellation()?;
+            let result = download_inventory(
                 ui,
                 &download,
                 config.source.unwrap_or_default(),
                 &inventory,
                 args.dry_run,
-                cancellation()?.as_ref(),
+                &cancelled,
                 started,
-            )
+            );
+            if let Some(history) = &mut history {
+                history.finish(if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                    130
+                } else {
+                    *result.as_ref().unwrap_or(&1)
+                })?;
+            }
+            result
         }
         Command::Ingest(args) => {
             log_config(args.config.as_deref(), ui);
-            let config = Config::for_ingest(&args)?;
+            let mut config = Config::for_ingest(&args)?;
             if ui.verbose {
                 effective(&config);
             }
@@ -121,7 +368,7 @@ fn run(cli: Cli) -> Result<u8> {
             let signal = cancelled.clone();
             ctrlc::set_handler(move || signal.store(true, std::sync::atomic::Ordering::Relaxed))?;
             if args.dry_run {
-                let preview = bfs::ingest::pipeline::preview(&config, &cancelled)?;
+                let preview = bfsort::ingest::pipeline::preview(&config, &cancelled)?;
                 output(
                     ui,
                     &preview,
@@ -130,13 +377,13 @@ fn run(cli: Cli) -> Result<u8> {
                         preview
                             .plan
                             .iter()
-                            .map(|e| bfs::app::presentation::safe_text(&e.planned.path))
+                            .map(|e| bfsort::app::presentation::safe_text(&e.planned.path))
                             .collect::<Vec<_>>()
                             .join("\n"),
                         preview.summary.occurrences,
                         preview.summary.unique_files,
                         preview.summary.duplicate_occurrences,
-                        bfs::app::presentation::safe_text(&config.output.display().to_string())
+                        bfsort::app::presentation::safe_text(&config.output.display().to_string())
                     ),
                 )?;
                 return Ok(0);
@@ -151,7 +398,10 @@ fn run(cli: Cli) -> Result<u8> {
                     "Warning: recursive extraction has unlimited tree budgets; configure [archive] limits."
                 );
             }
-            let report = bfs::ingest::pipeline::ingest(&config, &cancelled)?;
+            if !config.zip_enabled() {
+                config.operation_args = Some(std::env::args().skip(1).collect());
+            }
+            let report = bfsort::ingest::pipeline::ingest(&config, &cancelled)?;
             output(
                 ui,
                 &report,
@@ -166,9 +416,9 @@ fn run(cli: Cli) -> Result<u8> {
                     report.reused_occurrences,
                     report.skipped_files,
                     report.failures,
-                    bfs::app::presentation::bytes(report.summary.logical_bytes),
+                    bfsort::app::presentation::bytes(report.summary.logical_bytes),
                     report.elapsed_seconds,
-                    bfs::app::presentation::safe_text(&config.output.display().to_string()),
+                    bfsort::app::presentation::safe_text(&config.output.display().to_string()),
                     if report.interrupted {
                         "; interrupted"
                     } else {
@@ -179,8 +429,8 @@ fn run(cli: Cli) -> Result<u8> {
             if let Some(error) = &report.first_failure {
                 eprintln!(
                     "error: {}: {}",
-                    bfs::app::presentation::safe_text(&error.source_path),
-                    bfs::app::presentation::safe_text(&error.error)
+                    bfsort::app::presentation::safe_text(&error.source_path),
+                    bfsort::app::presentation::safe_text(&error.error)
                 );
             }
             if report.interrupted {
@@ -210,15 +460,30 @@ fn run(cli: Cli) -> Result<u8> {
             if config.inputs.is_empty() {
                 config
                     .inputs
-                    .push(bfs::app::config::DEFAULT_INPUT_DIRECTORY.into());
+                    .push(bfsort::app::config::DEFAULT_INPUT_DIRECTORY.into());
             }
             config.validate()?;
-            let archives =
-                bfs::ingest::discovery::discover(&config.inputs, config.recursive, &config.output)?;
+            let enumeration =
+                bfsort::app::presentation::Progress::new(None, "Enumerating archives");
+            let archives = bfsort::ingest::discovery::discover(
+                &config.inputs,
+                config.recursive,
+                &config.output,
+            )?;
+            drop(enumeration);
+            let progress = bfsort::app::presentation::Progress::new(
+                Some(archives.len() as u64),
+                "Inspecting archives",
+            );
             let inspections = archives
                 .iter()
-                .map(|path| bfs::output::archive::inspect(path, &config.limits))
+                .map(|path| {
+                    let result = bfsort::output::archive::inspect(path, &config.limits);
+                    progress.0.inc(1);
+                    result
+                })
                 .collect::<Result<Vec<_>>>()?;
+            drop(progress);
             output(
                 ui,
                 &inspections,
@@ -227,11 +492,14 @@ fn run(cli: Cli) -> Result<u8> {
             Ok(0)
         }
         Command::Report {
-            command: bfs::app::cli::ReportCommand::Mismatches(args),
+            command: bfsort::app::cli::ReportCommand::Mismatches(args),
         } => {
-            let repo = bfs::repository::storage::Repository::existing(&args.repository)?;
-            let records = bfs::repository::metadata::load(repo.root())?;
-            let report = bfs::output::report::mismatches(
+            let repo = bfsort::repository::storage::Repository::existing(&args.repository)?;
+            let records = bfsort::repository::metadata::select(
+                repo.root(),
+                &filters(&args.selection, args.config.as_deref(), ui)?,
+            )?;
+            let report = bfsort::output::report::mismatches(
                 &records,
                 &args.status,
                 args.min_confidence,
@@ -240,7 +508,7 @@ fn run(cli: Cli) -> Result<u8> {
             if report.rows.is_empty()
                 && !ui.quiet
                 && !ui.json
-                && matches!(args.format, bfs::output::report::ReportFormat::Table)
+                && matches!(args.format, bfsort::output::report::ReportFormat::Table)
             {
                 if records.is_empty() {
                     eprintln!("No stored occurrences to report.");
@@ -259,13 +527,13 @@ fn run(cli: Cli) -> Result<u8> {
                 }
             }
             let format =
-                if ui.json && matches!(args.format, bfs::output::report::ReportFormat::Table) {
-                    bfs::output::report::ReportFormat::Json
+                if ui.json && matches!(args.format, bfsort::output::report::ReportFormat::Table) {
+                    bfsort::output::report::ReportFormat::Json
                 } else {
                     args.format
                 };
             if let Some(path) = args.output {
-                bfs::ingest::discovery::check_path(&path)?;
+                bfsort::ingest::discovery::check_path(&path)?;
                 let parent = path
                     .parent()
                     .filter(|p| !p.as_os_str().is_empty())
@@ -286,13 +554,13 @@ fn run(cli: Cli) -> Result<u8> {
             resume,
             dry_run,
         } => {
-            let repo = bfs::repository::storage::Repository::existing(&repository)?;
+            let repo = bfsort::repository::storage::Repository::existing(&repository)?;
             let mut config = load(config.as_deref(), ui)?;
             config.resume = resume;
-            config.input_mode = bfs::app::config::InputMode::Archives;
+            config.input_mode = bfsort::app::config::InputMode::Archives;
             config.validate()?;
             if dry_run {
-                let preview = bfs::ingest::nested::preview(&repo, &config)?;
+                let preview = bfsort::ingest::nested::preview(&repo, &config)?;
                 output(
                     ui,
                     &preview,
@@ -315,7 +583,30 @@ fn run(cli: Cli) -> Result<u8> {
                     "Warning: recursive extraction has unlimited tree budgets; configure [archive] limits."
                 );
             }
-            let report = bfs::ingest::nested::analyze(&repo, &config, cancellation()?.as_ref())?;
+            anyhow::ensure!(
+                bfsort::repository::cleanup::removed(repo.root())?.is_empty(),
+                "nested analysis after logical removal requires a fresh repository"
+            );
+            let mut history = history(repo.root(), "analyze")?;
+            let cancelled = cancellation()?;
+            let result = bfsort::ingest::nested::analyze(&repo, &config, &cancelled);
+            if result.is_err() && cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                history.interrupt()?;
+            }
+            let report = result?;
+            history.record_counts(
+                None,
+                (report.accepted + report.reused_occurrences) as u64,
+                report.failures as u64,
+                0,
+            )?;
+            history.finish(if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                130
+            } else if report.failures > 0 {
+                1
+            } else {
+                0
+            })?;
             output(
                 ui,
                 &report,
@@ -334,24 +625,31 @@ fn run(cli: Cli) -> Result<u8> {
             resume,
             dry_run,
         } => {
-            let repo = bfs::repository::storage::Repository::existing(&repository)?;
+            let repo = bfsort::repository::storage::Repository::existing(&repository)?;
             if dry_run {
-                let rows = bfs::repository::metadata::load(repo.root())?;
+                let rows = bfsort::repository::metadata::load(repo.root())?;
                 let hashes: std::collections::BTreeSet<_> =
                     rows.iter().map(|r| &r.sha256).collect();
                 output(
                     ui,
-                    &serde_json::json!({"unique_objects": hashes.len(), "detector_version": bfs::detection::classifier::DETECTOR_VERSION}),
+                    &serde_json::json!({"unique_objects": hashes.len(), "detector_version": bfsort::detection::classifier::DETECTOR_VERSION}),
                     &format!(
                         "Preview: {} unique objects; detector {}",
                         hashes.len(),
-                        bfs::detection::classifier::DETECTOR_VERSION
+                        bfsort::detection::classifier::DETECTOR_VERSION
                     ),
                 )?;
                 return Ok(0);
             }
-            let count =
-                bfs::repository::metadata::reclassify(&repo, cancellation()?.as_ref(), resume)?;
+            let mut history = history(repo.root(), "reclassify")?;
+            let cancelled = cancellation()?;
+            let result = bfsort::repository::metadata::reclassify(&repo, &cancelled, resume);
+            if result.is_err() && cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                history.interrupt()?;
+            }
+            let count = result?;
+            history.record_counts(Some(count as u64), count as u64, 0, 0)?;
+            history.finish(0)?;
             output(
                 ui,
                 &serde_json::json!({"analyzed_occurrences": count}),
@@ -360,12 +658,13 @@ fn run(cli: Cli) -> Result<u8> {
             Ok(0)
         }
         Command::Export(args) => {
-            let repo = bfs::repository::storage::Repository::existing(&args.repository)?;
-            let rules = bfs::organization::rules::Rules::load_or_preset(
+            let repo = bfsort::repository::storage::Repository::existing(&args.repository)?;
+            let rules = bfsort::organization::rules::Rules::load_or_preset(
                 args.rules.as_deref(),
                 args.preset,
             )?;
             let config = Config {
+                filters: filters(&args.selection, args.config.as_deref(), ui)?,
                 resume: args.resume,
                 output: args.output,
                 zip: true,
@@ -374,13 +673,30 @@ fn run(cli: Cli) -> Result<u8> {
                 output_password_file: args.output_password_file,
                 ..Config::default()
             };
-            let exports = bfs::output::archive::export_repository(
+            let mut history = if args.dry_run {
+                None
+            } else {
+                Some(history(repo.root(), "export")?)
+            };
+            let cancelled = cancellation()?;
+            let result = bfsort::output::archive::export_repository(
                 &repo,
                 &rules,
                 &config,
                 args.dry_run,
-                cancellation()?.as_ref(),
-            )?;
+                &cancelled,
+            );
+            if result.is_err()
+                && cancelled.load(std::sync::atomic::Ordering::Relaxed)
+                && let Some(history) = &mut history
+            {
+                history.interrupt()?;
+            }
+            let exports = result?;
+            if let Some(history) = &mut history {
+                history.record_counts(Some(exports.len() as u64), exports.len() as u64, 0, 0)?;
+                history.finish(0)?;
+            }
             output(
                 ui,
                 &exports,
@@ -390,36 +706,50 @@ fn run(cli: Cli) -> Result<u8> {
                     exports.len(),
                     exports.iter().filter(|export| export.reused).count(),
                     started.elapsed().as_secs_f64(),
-                    bfs::app::presentation::safe_text(&config.output.display().to_string())
+                    bfsort::app::presentation::safe_text(&config.output.display().to_string())
                 ),
             )?;
             Ok(0)
         }
-        Command::Stats { repository } => {
-            let repo = bfs::repository::storage::Repository::existing(&repository)?;
-            let records = bfs::repository::metadata::load(repo.root())?;
-            let summary = bfs::output::report::summary(&repo, &records)?;
+        Command::Stats {
+            repository,
+            selection,
+            config,
+        } => {
+            let repo = bfsort::repository::storage::Repository::existing(&repository)?;
+            let catalog = bfsort::repository::catalog::read(repo.root())?;
+            let all = catalog.select(&Default::default(), false)?;
+            let referenced = all.iter().map(|r| r.sha256.clone()).collect();
+            let records = catalog.select(&filters(&selection, config.as_deref(), ui)?, false)?;
+            let summary =
+                bfsort::output::report::summary_with_references(&repo, &records, &referenced)?;
             output(
                 ui,
                 &summary,
-                &bfs::app::presentation::stats(repo.root(), &summary),
+                &bfsort::app::presentation::stats(repo.root(), &summary),
             )?;
             Ok(0)
         }
         Command::Reorganize {
+            selection,
+            config,
             repository,
             rules,
             preset,
             dry_run,
         } => {
-            let rules = bfs::organization::rules::Rules::load_or_preset(rules.as_deref(), preset)?;
-            let repo = bfs::repository::storage::Repository::existing(&repository)?;
-            let records = bfs::repository::metadata::load(repo.root())?;
+            let rules =
+                bfsort::organization::rules::Rules::load_or_preset(rules.as_deref(), preset)?;
+            let repo = bfsort::repository::storage::Repository::existing(&repository)?;
+            let records = bfsort::repository::metadata::select(
+                repo.root(),
+                &filters(&selection, config.as_deref(), ui)?,
+            )?;
             let plan = rules.plan(&records)?;
             if dry_run {
                 output(ui, &plan, &serde_json::to_string_pretty(&plan)?)?;
             } else {
-                let count = bfs::organization::organizer::organize(&repo, &rules, &plan)?;
+                let count = bfsort::organization::organizer::organize(&repo, &rules, &plan)?;
                 output(ui, &count, &format!("Completed: {count} organized"))?;
             }
             Ok(0)
@@ -429,22 +759,22 @@ fn run(cli: Cli) -> Result<u8> {
 /// Initialize logging, run the CLI, and convert errors into an exit code.
 fn main() -> std::process::ExitCode {
     let arguments: Vec<_> = std::env::args_os().collect();
-    let mut mode = bfs::app::cli::ColorMode::Auto;
+    let mut mode = bfsort::app::cli::ColorMode::Auto;
     for pair in arguments.windows(2) {
         if pair[0] == "--color" {
             mode = match pair[1].to_str() {
-                Some("always") => bfs::app::cli::ColorMode::Always,
-                Some("never") => bfs::app::cli::ColorMode::Never,
-                _ => bfs::app::cli::ColorMode::Auto,
+                Some("always") => bfsort::app::cli::ColorMode::Always,
+                Some("never") => bfsort::app::cli::ColorMode::Never,
+                _ => bfsort::app::cli::ColorMode::Auto,
             };
         }
     }
     for arg in &arguments {
         if arg == "--color=always" {
-            mode = bfs::app::cli::ColorMode::Always;
+            mode = bfsort::app::cli::ColorMode::Always;
         }
         if arg == "--color=never" {
-            mode = bfs::app::cli::ColorMode::Never;
+            mode = bfsort::app::cli::ColorMode::Never;
         }
     }
     let machine_format = arguments.windows(2).any(|pair| {
@@ -460,18 +790,18 @@ fn main() -> std::process::ExitCode {
         clap::ColorChoice::Never
     } else {
         match mode {
-            bfs::app::cli::ColorMode::Always => clap::ColorChoice::Always,
-            bfs::app::cli::ColorMode::Never => clap::ColorChoice::Never,
-            bfs::app::cli::ColorMode::Auto => clap::ColorChoice::Auto,
+            bfsort::app::cli::ColorMode::Always => clap::ColorChoice::Always,
+            bfsort::app::cli::ColorMode::Never => clap::ColorChoice::Never,
+            bfsort::app::cli::ColorMode::Auto => clap::ColorChoice::Auto,
         }
     };
     let matches = Cli::command().color(choice).get_matches_from(arguments);
     let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
-    if matches!(&cli.command, Command::Report { command: bfs::app::cli::ReportCommand::Mismatches(args) } if !matches!(args.format, bfs::output::report::ReportFormat::Table))
+    if matches!(&cli.command, Command::Report { command: bfsort::app::cli::ReportCommand::Mismatches(args) } if !matches!(args.format, bfsort::output::report::ReportFormat::Table))
     {
         cli.presentation.json = true;
     }
-    bfs::app::presentation::initialize(&cli.presentation);
+    bfsort::app::presentation::initialize(&cli.presentation);
     let verbose = cli.presentation.verbose;
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -485,13 +815,13 @@ fn main() -> std::process::ExitCode {
         Err(error) => {
             eprintln!(
                 "{}: {}",
-                bfs::app::presentation::label("error", "31"),
-                bfs::app::presentation::safe_text(&format!("{error:#}"))
+                bfsort::app::presentation::label("error", "31"),
+                bfsort::app::presentation::safe_text(&format!("{error:#}"))
             );
             if verbose {
                 eprintln!(
                     "Details: {}",
-                    bfs::app::presentation::safe_text(&format!("{error:#}"))
+                    bfsort::app::presentation::safe_text(&format!("{error:#}"))
                 );
             }
             std::process::ExitCode::from(1)
@@ -506,18 +836,18 @@ fn cancellation() -> Result<std::sync::Arc<std::sync::atomic::AtomicBool>> {
     Ok(flag)
 }
 
-fn log_config(path: Option<&std::path::Path>, ui: &bfs::app::cli::Presentation) {
+fn log_config(path: Option<&std::path::Path>, ui: &bfsort::app::cli::Presentation) {
     if ui.verbose {
         match Config::active_path(path) {
             Some(path) => eprintln!(
                 "Configuration: {}",
-                bfs::app::presentation::safe_text(&path.display().to_string())
+                bfsort::app::presentation::safe_text(&path.display().to_string())
             ),
             None => eprintln!("Configuration: built-in defaults"),
         }
     }
 }
-fn load(path: Option<&std::path::Path>, ui: &bfs::app::cli::Presentation) -> Result<Config> {
+fn load(path: Option<&std::path::Path>, ui: &bfsort::app::cli::Presentation) -> Result<Config> {
     log_config(path, ui);
     let config = Config::load(path)?;
     if ui.verbose {
@@ -528,13 +858,13 @@ fn load(path: Option<&std::path::Path>, ui: &bfs::app::cli::Presentation) -> Res
 fn effective(config: &Config) {
     eprintln!(
         "Settings: output {}; workers {}; resume {}",
-        bfs::app::presentation::safe_text(&config.output.display().to_string()),
+        bfsort::app::presentation::safe_text(&config.output.display().to_string()),
         config.workers,
         config.resume
     );
     let size = |value: Option<u64>| {
         value
-            .map(bfs::app::presentation::bytes)
+            .map(bfsort::app::presentation::bytes)
             .unwrap_or_else(|| "unlimited".into())
     };
     eprintln!(
@@ -554,7 +884,7 @@ fn effective(config: &Config) {
     for path in &config.inputs {
         eprintln!(
             "Input: {}",
-            bfs::app::presentation::safe_text(&path.display().to_string())
+            bfsort::app::presentation::safe_text(&path.display().to_string())
         );
     }
     if let Some(source) = &config.source {
@@ -581,8 +911,8 @@ fn effective(config: &Config) {
         );
         eprintln!(
             "Download: inventory {}; staging {}; workers {}; timeout {}",
-            bfs::app::presentation::safe_text(&download.inventory.display().to_string()),
-            bfs::app::presentation::safe_text(&download.staging_dir.display().to_string()),
+            bfsort::app::presentation::safe_text(&download.inventory.display().to_string()),
+            bfsort::app::presentation::safe_text(&download.staging_dir.display().to_string()),
             download.concurrency,
             download
                 .timeout_seconds
@@ -591,7 +921,7 @@ fn effective(config: &Config) {
     }
 }
 fn output(
-    ui: &bfs::app::cli::Presentation,
+    ui: &bfsort::app::cli::Presentation,
     value: &impl serde::Serialize,
     human: &str,
 ) -> Result<()> {
@@ -602,7 +932,7 @@ fn output(
         println!("{}", serde_json::to_string(value)?);
     } else if !ui.quiet {
         use std::io::IsTerminal;
-        if bfs::app::presentation::color_enabled(
+        if bfsort::app::presentation::color_enabled(
             ui.color,
             ui.no_color,
             ui.json,
@@ -632,33 +962,33 @@ fn output(
     Ok(())
 }
 fn save_inventory(
-    download: &bfs::collection::acquisition::DownloadConfig,
-    inventory: &bfs::collection::acquisition::Inventory,
+    download: &bfsort::collection::acquisition::DownloadConfig,
+    inventory: &bfsort::collection::acquisition::Inventory,
 ) -> Result<()> {
     let parent = download
         .inventory
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(std::path::Path::new("."));
-    bfs::collection::acquisition::private_tree(parent)?;
-    bfs::collection::acquisition::save_json(&download.inventory, inventory)
+    bfsort::collection::acquisition::private_tree(parent)?;
+    bfsort::collection::acquisition::save_json(&download.inventory, inventory)
 }
 fn download_inventory(
-    ui: &bfs::app::cli::Presentation,
-    download: &bfs::collection::acquisition::DownloadConfig,
-    mut source: bfs::collection::acquisition::SourceConfig,
-    inventory: &bfs::collection::acquisition::Inventory,
+    ui: &bfsort::app::cli::Presentation,
+    download: &bfsort::collection::acquisition::DownloadConfig,
+    mut source: bfsort::collection::acquisition::SourceConfig,
+    inventory: &bfsort::collection::acquisition::Inventory,
     dry_run: bool,
     cancelled: &std::sync::atomic::AtomicBool,
     started: std::time::Instant,
 ) -> Result<u8> {
     let report = if dry_run || inventory.candidates.is_empty() {
-        bfs::collection::download::preview(download, inventory)?
+        bfsort::collection::download::preview(download, inventory)?
     } else {
         if source.page.is_empty() {
             source.page = inventory.candidates[0].url.clone();
         }
-        bfs::collection::download::run(download, &source, inventory, cancelled)?
+        bfsort::collection::download::run(download, &source, inventory, cancelled)?
     };
     output(
         ui,
@@ -678,9 +1008,9 @@ fn download_inventory(
             report.not_attempted,
             report.candidates.len(),
             report.filtered,
-            bfs::app::presentation::bytes(report.bytes),
+            bfsort::app::presentation::bytes(report.bytes),
             started.elapsed().as_secs_f64(),
-            bfs::app::presentation::safe_text(&download.staging_dir.display().to_string())
+            bfsort::app::presentation::safe_text(&download.staging_dir.display().to_string())
         ),
     )?;
     if !ui.quiet && !ui.json && !dry_run {
@@ -689,7 +1019,7 @@ fn download_inventory(
         );
     }
     for error in &report.errors {
-        eprintln!("error: {}", bfs::app::presentation::safe_text(error));
+        eprintln!("error: {}", bfsort::app::presentation::safe_text(error));
     }
     Ok(if report.failed + report.not_attempted == 0 {
         0
@@ -698,4 +1028,54 @@ fn download_inventory(
     } else {
         1
     })
+}
+
+fn filters(
+    selection: &bfsort::selection::Selection,
+    path: Option<&std::path::Path>,
+    ui: &bfsort::app::cli::Presentation,
+) -> Result<bfsort::selection::Filters> {
+    let config = load(path, ui)?;
+    config.validate()?;
+    selection.resolve(config.filters)
+}
+
+fn derived(
+    ui: &bfsort::app::cli::Presentation,
+    sources: Vec<std::path::PathBuf>,
+    destination: std::path::PathBuf,
+    kind: bfsort::repository::derive::Kind,
+    selection: bfsort::selection::Selection,
+    config: Option<std::path::PathBuf>,
+    dry_run: bool,
+) -> Result<u8> {
+    let report = bfsort::repository::derive::run(
+        &bfsort::repository::derive::Options {
+            sources,
+            output: destination,
+            kind,
+            dry_run,
+        },
+        &filters(&selection, config.as_deref(), ui)?,
+        cancellation()?.as_ref(),
+    )?;
+    output(ui, &report, &serde_json::to_string_pretty(&report)?)?;
+    Ok(0)
+}
+
+fn collection_root(download: &bfsort::collection::acquisition::DownloadConfig) -> &std::path::Path {
+    download
+        .inventory
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."))
+}
+
+fn history(root: &std::path::Path, command: &str) -> Result<bfsort::operations::Guard> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut guard = bfsort::operations::Guard::start(root, command, &args)?;
+    if let Ok(id) = std::env::var("BFSORT_RETRY_OF") {
+        guard.set_retry_of(&id)?;
+    }
+    Ok(guard)
 }

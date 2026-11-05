@@ -318,7 +318,7 @@ pub(super) fn traverse(
                         if published.contains(&row.occurrence_id) {
                             report.reused_occurrences += 1;
                         } else {
-                            metadata::append(journal, &row)?;
+                            metadata::publish(repo, journal, &row)?;
                             published.insert(row.occurrence_id.clone());
                             report.accepted += 1;
                         }

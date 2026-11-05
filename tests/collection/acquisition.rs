@@ -5,7 +5,7 @@
 //! Exercises public BFS behavior with disposable fixtures; failures should identify
 //! contract regressions without changing user repositories.
 
-use bfs::collection::acquisition::parse_bytes;
+use bfsort::collection::acquisition::parse_bytes;
 
 #[test]
 fn readable_sizes() {
@@ -18,7 +18,7 @@ fn readable_sizes() {
 
 #[test]
 fn policies_exclude_before_include_and_sort_names() {
-    use bfs::collection::acquisition::*;
+    use bfsort::collection::acquisition::*;
     let config: DownloadConfig = toml::from_str(
         r#"
         order_by = "name"
@@ -51,7 +51,7 @@ fn policies_exclude_before_include_and_sort_names() {
 
 #[test]
 fn limits_and_directory_validation() {
-    use bfs::collection::acquisition::DownloadConfig;
+    use bfsort::collection::acquisition::DownloadConfig;
     for setting in [
         "max_speed = '0 MB/s'",
         "max_speed = '2 MB'",
@@ -79,12 +79,12 @@ fn existing_staging_directory_must_be_private() {
     let path = temp.path().join("payloads");
     std::fs::create_dir(&path).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    assert!(bfs::collection::acquisition::private_tree(&path).is_err());
+    assert!(bfsort::collection::acquisition::private_tree(&path).is_err());
 }
 
 #[test]
 fn download_defaults_do_not_impose_transfer_caps() {
-    use bfs::collection::acquisition::*;
+    use bfsort::collection::acquisition::*;
     let config = DownloadConfig::default();
     config.validate().unwrap();
     assert_eq!(config.max_files, None);

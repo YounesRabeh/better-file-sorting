@@ -36,6 +36,16 @@ pub struct Summary {
 }
 /// Summarize manifest occurrences, canonical objects, and storage usage.
 pub fn summary(repo: &Repository, records: &[Occurrence]) -> Result<Summary> {
+    let referenced = records.iter().map(|r| r.sha256.clone()).collect();
+    summary_with_references(repo, records, &referenced)
+}
+
+/// Selection affects logical counts; canonical storage and orphan counts remain repository-wide.
+pub fn summary_with_references(
+    repo: &Repository,
+    records: &[Occurrence],
+    referenced: &BTreeSet<String>,
+) -> Result<Summary> {
     let mut hashes = BTreeSet::new();
     let mut categories = BTreeMap::new();
     for r in records {
@@ -77,7 +87,7 @@ pub fn summary(repo: &Repository, records: &[Occurrence]) -> Result<Summary> {
         let meta = entry.metadata()?;
         stored += meta.len();
         stored_objects += 1;
-        if !hashes.contains(hash) {
+        if !referenced.contains(hash) {
             orphan_objects += 1;
         }
         #[cfg(unix)]

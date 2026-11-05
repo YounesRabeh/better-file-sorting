@@ -159,3 +159,13 @@ limits. `nested_extraction = true` requires `input_mode = "archives"` and positi
 `max_depth`. Disabled extraction requires zero depth. Tree budgets accept the same
 positive integer/readable size/`"unlimited"` syntax as other limits; omitted budgets
 are unlimited. See [nested extraction](nested.md) before processing large collections.
+
+## Shared selection filters
+
+`[filters]` selects stored occurrences or ingestion members independently of sorting
+rules. See [repository selection](repository-tools.md#selection) and
+[examples/filters.toml](../examples/filters.toml). Empty include lists allow all
+values; matching exclusions win. A supplied CLI list replaces that TOML list.
+Optional `sha256`, `mismatch`, `min_size` and `max_size` fields correspond to the
+same CLI flags; sizes here are integer bytes with inclusive bounds. Unknown
+fields/formats and reversed size ranges fail configuration validation.

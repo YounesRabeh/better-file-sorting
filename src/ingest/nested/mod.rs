@@ -362,6 +362,10 @@ pub struct Preview {
     pub expanded_bytes: Option<u64>,
 }
 pub fn preview(repo: &Repository, config: &Config) -> Result<Preview> {
+    ensure!(
+        crate::repository::cleanup::removed(repo.root())?.is_empty(),
+        "nested analysis after logical removal requires a fresh repository"
+    );
     let records = metadata::load(repo.root())?;
     let candidates: Vec<_> = records
         .iter()
@@ -410,6 +414,10 @@ pub fn preview(repo: &Repository, config: &Config) -> Result<Preview> {
 }
 pub fn analyze(repo: &Repository, config: &Config, cancelled: &AtomicBool) -> Result<TreeReport> {
     ensure!(
+        crate::repository::cleanup::removed(repo.root())?.is_empty(),
+        "nested analysis after logical removal requires a fresh repository"
+    );
+    ensure!(
         repo.mode() == SecurityMode::Standard,
         "analysis requires a standard repository; sealed payloads are never unlocked automatically"
     );
@@ -438,12 +446,18 @@ pub fn analyze(repo: &Repository, config: &Config, cancelled: &AtomicBool) -> Re
         ..Default::default()
     };
     let passwords = security::passwords(config.password_file.as_deref())?;
-    for mut parent in records.into_iter().filter(|r| {
-        r.nested
-            .as_ref()
-            .is_none_or(|n| n.parent_occurrence_id.is_none())
-            && is_zip(&r.detection)
-    }) {
+    let roots: Vec<_> = records
+        .into_iter()
+        .filter(|r| {
+            r.nested
+                .as_ref()
+                .is_none_or(|n| n.parent_occurrence_id.is_none())
+                && is_zip(&r.detection)
+        })
+        .collect();
+    let progress =
+        crate::app::presentation::Progress::new(Some(roots.len() as u64), "Analyzing root ZIPs");
+    for mut parent in roots {
         parent.run_id = run_id.clone();
         let next = traverse(
             repo,
@@ -472,7 +486,17 @@ pub fn analyze(repo: &Repository, config: &Config, cancelled: &AtomicBool) -> Re
             &mut journal_file,
         )?;
         report.merge(next);
+        progress.0.inc(1);
+        progress.0.set_message(format!(
+            "archives extracted {} / reused {}; entries accepted {} / reused {}; failures {}",
+            report.metrics.extracted_archives,
+            report.metrics.reused_archives,
+            report.accepted,
+            report.reused_occurrences,
+            report.failures
+        ));
     }
+    drop(progress);
     let rows = metadata::load(repo.root())?;
     let rules =
         crate::organization::rules::Rules::load_or_preset(config.rules.as_deref(), config.preset)?;

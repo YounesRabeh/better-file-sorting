@@ -1,5 +1,5 @@
 use crate::common;
-use bfs::organization::rules::{Preset, Rules};
+use bfsort::organization::rules::{Preset, Rules};
 #[test]
 fn embedded_presets_and_portable_exports_preserve_provenance() {
     let t = tempfile::tempdir().unwrap();
@@ -25,7 +25,7 @@ fn embedded_presets_and_portable_exports_preserve_provenance() {
         .status
         .success()
     );
-    let records = bfs::repository::metadata::load(&root).unwrap();
+    let records = bfsort::repository::metadata::load(&root).unwrap();
     for (preset, expected) in [
         (Preset::ByFormat, "pdf"),
         (Preset::ByExtension, "bin"),
@@ -301,7 +301,7 @@ fn automatic_fallback_exports_each_dynamic_group_and_keeps_explicit_rules() {
         assert_eq!(manifest.lines().count(), count);
     }
     assert!(common::run(&args).status.success());
-    let rows = bfs::repository::metadata::load(&root).unwrap();
+    let rows = bfsort::repository::metadata::load(&root).unwrap();
     let explicit = Rules::parse("[organization]\nduplicates = 'all'\ndefault_directory = 'remainder'\n[[rules]]\nname = 'selected-extension'\n[rules.match]\noriginal_extension = 'newtype'\n[rules.output]\ndirectory = 'my-selection'\nfilename = '{sha256}.sample'\n").unwrap();
     let plan = explicit.plan(&rows).unwrap();
     assert_eq!(

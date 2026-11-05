@@ -82,8 +82,9 @@ operation until networking returns. It owns no output file and cannot keep the
 CLI process alive. Cancellation is not a guarantee that the OS socket closes
 immediately. No user deadline is imposed when `timeout_seconds` is omitted.
 
-Entry-level extraction continuation, HTTP Range continuation, a dedicated resume
-management command, and merge/split operations are not implemented.
+Entry-level extraction continuation and HTTP Range continuation are not implemented.
+Operation-level retry and new independent repository copies are described in
+[repository tools](repository-tools.md). Merge/split/sample copies cannot resume.
 
 ## Nested archives and reclassification
 

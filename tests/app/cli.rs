@@ -47,14 +47,14 @@ fn rejects_invalid_configuration_before_output_creation() {
 fn discover_accepts_url_without_config() {
     use clap::Parser;
     assert!(
-        bfs::app::cli::Cli::try_parse_from(["bfs", "discover", "https://example.org/"]).is_ok()
+        bfsort::app::cli::Cli::try_parse_from(["bfs", "discover", "https://example.org/"]).is_ok()
     );
     assert!(
-        bfs::app::cli::Cli::try_parse_from(["bfs", "discover", "--config", "collection.toml"])
+        bfsort::app::cli::Cli::try_parse_from(["bfs", "discover", "--config", "collection.toml"])
             .is_ok()
     );
-    assert!(bfs::app::cli::Cli::try_parse_from(["bfs", "discover"]).is_ok());
-    assert!(bfs::app::cli::Cli::try_parse_from(["bfs", "download"]).is_ok());
+    assert!(bfsort::app::cli::Cli::try_parse_from(["bfs", "discover"]).is_ok());
+    assert!(bfsort::app::cli::Cli::try_parse_from(["bfs", "download"]).is_ok());
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn commands_accept_default_settings_without_config() {
     use clap::Parser;
     for command in ["download", "ingest", "inspect", "stats", "reorganize"] {
         assert!(
-            bfs::app::cli::Cli::try_parse_from(["bfs", command]).is_ok(),
+            bfsort::app::cli::Cli::try_parse_from(["bfs", command]).is_ok(),
             "{command}"
         );
     }
@@ -122,7 +122,7 @@ fn reworked_workflow_flags_parse() {
         vec!["bfs", "config", "validate", "-c", "bfs.toml"],
     ] {
         assert!(
-            bfs::app::cli::Cli::try_parse_from(&args).is_ok(),
+            bfsort::app::cli::Cli::try_parse_from(&args).is_ok(),
             "{args:?}"
         );
     }

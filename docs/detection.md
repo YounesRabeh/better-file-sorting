@@ -27,10 +27,12 @@ bfsort reclassify ./repository --resume
 ```
 
 This hash-verifies each unique object and performs bounded classification, then
-atomically replaces `reports/classification.jsonl`. Original journals and payloads
-remain unchanged; metadata readers overlay only detection and mismatch fields.
-Analysis is cancellable and an interrupted analysis leaves the previous sidecar
-intact. Per-object checkpoints reuse detection with `--resume`; objects are still hash-verified. A new view is published using saved grouping rules; older views fall back to `by-format`.
+atomically updates the SQLite classification metadata, then exports a compatibility
+`reports/classification.jsonl` snapshot. Original journals and payloads remain
+unchanged; legacy repositories import the old sidecar during migration. Analysis
+is cancellable; an interrupted transaction preserves the previous catalog values.
+After a successful transaction the catalog stays authoritative even if writing
+its compatibility snapshot fails. Per-object checkpoints reuse detection with `--resume`; objects are still hash-verified. A new view is published using saved grouping rules; older views fall back to `by-format`.
 Sealed repositories are refused; bfsort never changes payload permissions automatically.
 
 ## Supported identifiers and evidence

@@ -1,5 +1,5 @@
 //! Small labelled benign corpus; measurements are synthetic, not real-world accuracy.
-use bfs::{
+use bfsort::{
     detection::classifier::{self, Confidence},
     detection::mismatch::{self, Status},
 };
