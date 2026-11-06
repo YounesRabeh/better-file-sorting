@@ -111,14 +111,24 @@ pub fn append(writer: &mut fs::File, record: &impl Serialize) -> Result<()> {
     Ok(())
 }
 pub fn store(repo: &super::storage::Repository, record: &Occurrence) -> Result<()> {
-    record.validate()?;
-    let path = repo.object(&record.sha256)?;
-    security::validate_file(&path, repo.mode())?;
-    ensure!(
-        fs::metadata(path)?.len() == record.size,
-        "manifest/object size mismatch"
-    );
-    repo.with_catalog(|catalog| catalog.insert(record))
+    store_many(repo, std::slice::from_ref(record))
+}
+
+/// Validate every durable object before publishing a bounded metadata batch atomically.
+pub fn store_many(repo: &super::storage::Repository, records: &[Occurrence]) -> Result<()> {
+    if records.is_empty() {
+        return Ok(());
+    }
+    for record in records {
+        record.validate()?;
+        let path = repo.object(&record.sha256)?;
+        security::validate_file(&path, repo.mode())?;
+        ensure!(
+            fs::metadata(path)?.len() == record.size,
+            "manifest/object size mismatch"
+        );
+    }
+    repo.with_catalog(|catalog| catalog.insert_many(records))
 }
 
 /// Import an entire interchange file atomically; never publish partial input or replace identities.

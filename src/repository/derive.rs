@@ -651,6 +651,7 @@ pub fn run(options: &Options, filter: &Filters, cancelled: &AtomicBool) -> Resul
             );
         }
         let mut copied = BTreeSet::new();
+        let mut pending = Vec::with_capacity(128);
         for row in parent_first(rows)? {
             interrupted(cancelled)?;
             if copied.insert(row.sha256.clone()) {
@@ -690,8 +691,13 @@ pub fn run(options: &Options, filter: &Filters, cancelled: &AtomicBool) -> Resul
                     repo.commit(output, &row.sha256, size)?;
                 }
             }
-            metadata::store(&repo, row)?;
+            pending.push(row.clone());
+            if pending.len() == 128 {
+                metadata::store_many(&repo, &pending)?;
+                pending.clear();
+            }
         }
+        metadata::store_many(&repo, &pending)?;
         let dataset = dataset_report(rows)?;
         let mut file = tempfile::NamedTempFile::new_in(&stage)?;
         serde_json::to_writer_pretty(&mut file, &dataset)?;

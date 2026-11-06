@@ -462,6 +462,7 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                 return Ok(());
             }
             let mut input_error: Option<String> = None;
+            let mut pending_records = Vec::with_capacity(128);
             let mut work = || -> Result<()> {
                 if config.archive.nested_extraction {
                     let result = crate::ingest::nested::ingest_root(
@@ -656,10 +657,14 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                                 continue;
                             }
                             repo.commit(item.file, &record.sha256, record.size)?;
+                            pending_records.push(record.clone());
+                            if pending_records.len() == 128 {
+                                metadata::store_many(&repo, &pending_records)?;
+                                pending_records.clear();
+                            }
                             let mut journal = journal
                                 .lock()
                                 .map_err(|_| anyhow::anyhow!("journal lock poisoned"))?;
-                            metadata::store(&repo, &record)?;
                             completed_records.push(record);
                             journal.accepted += 1;
                             journal.bytes += item.size;
@@ -680,6 +685,8 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                         }
                     }
                 }
+                metadata::store_many(&repo, &pending_records)?;
+                pending_records.clear();
                 if complete
                     && !cancelled.load(Ordering::Relaxed)
                     && let Some(input_hash) = input_hash
@@ -711,6 +718,7 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                     .map_err(|_| anyhow::anyhow!("journal lock poisoned"))?
                     .failure(path, None, &error)?;
             }
+            metadata::store_many(&repo, &pending_records)?;
             if let Some(id) = &operation_id {
                 let state = if cancelled.load(Ordering::Relaxed) {
                     "interrupted"

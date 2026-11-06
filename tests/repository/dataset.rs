@@ -510,7 +510,15 @@ fn staged_tombstones_are_rejected_instead_of_hiding_requested_rows() {
             metadata::digest(o.output.as_os_str().as_encoded_bytes())
         ))
         .join("result");
-    let row = metadata::load(&staged).unwrap().remove(0);
+    // A failed copy can now precede the first batch commit. Model an earlier committed batch.
+    let staged_repo = bfsort::repository::storage::Repository::existing(&staged).unwrap();
+    let row = rows
+        .iter()
+        .find(|row| row.sha256 != last.sha256 && staged_repo.object(&row.sha256).unwrap().is_file())
+        .unwrap()
+        .clone();
+    metadata::store(&staged_repo, &row).unwrap();
+    drop(staged_repo);
     bfsort::repository::cleanup::remove(
         &staged,
         &Filters {

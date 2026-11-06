@@ -76,7 +76,7 @@ pub fn extract_file(
         prefix.extend_from_slice(&buffer[..count.min(8192 - prefix.len())]);
         file.write_all(&buffer[..count])?;
     }
-    file.as_file().sync_all()?;
+    // Object publication synchronizes content and final permissions before committing metadata.
     Ok(Extracted {
         file,
         sha256: hash.finalize().iter().map(|b| format!("{b:02x}")).collect(),
@@ -226,7 +226,6 @@ pub fn extract_budgeted(
         if invalid || size != expected_size {
             continue;
         }
-        file.as_file().sync_all()?;
         return Ok(Extracted {
             file,
             sha256: hash.finalize().iter().map(|b| format!("{b:02x}")).collect(),

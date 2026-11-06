@@ -141,6 +141,7 @@ pub fn publish_exports(
             &export.entries,
             &export.output,
             password,
+            config.compression_level,
             cancelled,
             records,
         );
@@ -170,6 +171,7 @@ pub fn publish_exports(
             &export.entries,
             &staging.path().join(relative),
             password,
+            config.compression_level,
             cancelled,
             records,
         )?;
@@ -235,6 +237,7 @@ fn publish(
     plan: &[crate::organization::rules::Planned],
     output: &Path,
     password: Option<&str>,
+    compression_level: Option<u8>,
     cancelled: &std::sync::atomic::AtomicBool,
     records: &[crate::repository::metadata::Occurrence],
 ) -> Result<()> {
@@ -253,7 +256,12 @@ fn publish(
     let mut file = tempfile::NamedTempFile::new_in(parent)?;
     let mut zip = zip::ZipWriter::new(file.as_file_mut());
     let mut options = zip::write::SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Deflated)
+        .compression_method(if compression_level == Some(0) {
+            CompressionMethod::Stored
+        } else {
+            CompressionMethod::Deflated
+        })
+        .compression_level(compression_level.filter(|&level| level > 0).map(i64::from))
         .unix_permissions(0o600);
     if let Some(password) = password {
         options = options.with_aes_encryption(zip::AesMode::Aes256, password);
@@ -463,6 +471,7 @@ fn publish_resumable(
         exports,
         records,
         password.is_some(),
+        config.compression_level,
     ))?);
     let existed = state_path.try_exists()?;
     let mut state: ExportCheckpoint = if existed {
@@ -558,6 +567,7 @@ fn publish_resumable(
                 &export.entries,
                 &export.output,
                 password,
+                config.compression_level,
                 cancelled,
                 records,
             )?;

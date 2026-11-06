@@ -232,6 +232,9 @@ pub struct Ingest {
     /// Export archive samples with safe, original or detected filename suffixes
     #[arg(long, value_enum)]
     pub naming: Option<crate::organization::rules::ExportNaming>,
+    /// ZIP compression: 0 stores entries, 1 is fastest, 9 compresses most
+    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=9))]
+    pub compression_level: Option<u8>,
     #[command(flatten)]
     pub selection: crate::selection::Selection,
     /// Verify and reuse completed work from an earlier run
@@ -404,6 +407,9 @@ pub struct Export {
     /// Export archive samples with safe, original or detected filename suffixes
     #[arg(long, value_enum)]
     pub naming: Option<crate::organization::rules::ExportNaming>,
+    /// ZIP compression: 0 stores entries, 1 is fastest, 9 compresses most
+    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=9))]
+    pub compression_level: Option<u8>,
     #[command(flatten)]
     pub selection: crate::selection::Selection,
     #[arg(short = 'c', long)]

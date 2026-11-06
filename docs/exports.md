@@ -137,3 +137,13 @@ repository objects. Compression ratios are data-dependent.
 
 Nested provenance remains in the source repository catalog. ZIP exports are
 payload collections with a compact report, not independent repositories.
+
+## Compression cost
+
+`--compression-level 0` stores entries without compression; `1` selects fast Deflate, and `9` favors size. Omit it to retain the library default. Ingest ZIP output and repository export accept the same option. Runtime TOML uses `compression_level = 1`. Resume fingerprints include the compression setting; use the same setting on retries. Changing it requires a fresh output/checkpoint.
+
+```sh
+bfsort export ./repository --include-format pdf --naming detected --compression-level 0 -o ./pdfs.zip
+```
+
+Stored ZIPs can be larger, but avoid recompressing already-compressed content. Neither mode changes payload bytes or integrity requirements.

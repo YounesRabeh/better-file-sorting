@@ -126,6 +126,7 @@ pub fn write(root: &Path) -> Result<Catalog> {
         if connection.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))? == 1 {
             connection.execute_batch("BEGIN IMMEDIATE; ALTER TABLE occurrences ADD COLUMN structural INTEGER NOT NULL DEFAULT 0 CHECK(structural IN (0,1)); CREATE TABLE operation_inputs(operation_id TEXT NOT NULL REFERENCES operations(id),source_path TEXT NOT NULL,state TEXT NOT NULL,error TEXT,PRIMARY KEY(operation_id,source_path)); PRAGMA user_version=2; COMMIT;")?;
         }
+        validate_relationships(&connection)?;
         return Ok(Catalog { connection });
     }
     let temporary = tempfile::NamedTempFile::new_in(root)?;
@@ -397,7 +398,13 @@ impl Catalog {
         for row in rows {
             insert(&transaction, row)?;
         }
-        validate_relationships(&transaction)?;
+        // Existing relationships were checked when opening the writer; only these identities changed.
+        let mut check = transaction.prepare_cached("SELECT EXISTS(SELECT 1 FROM ancestry a JOIN occurrences p ON p.id=a.parent_id WHERE a.occurrence_id=?1 AND p.hash<>a.parent_hash) OR EXISTS(SELECT 1 FROM ancestry a JOIN tombstones parent ON parent.id=a.parent_id WHERE a.occurrence_id=?1 AND NOT EXISTS(SELECT 1 FROM tombstones child WHERE child.id=a.occurrence_id))")?;
+        for row in rows {
+            let invalid: bool = check.query_row([&row.occurrence_id], |r| r.get(0))?;
+            ensure!(!invalid, "catalog reference identity mismatch");
+        }
+        drop(check);
         transaction.commit()?;
         Ok(())
     }
@@ -441,7 +448,7 @@ impl Catalog {
             "0"
         };
         let (predicate, values) = predicate(filters, include_removed, structural_supported)?;
-        let mut statement=self.connection.prepare(&format!("SELECT o.record,o.id,o.hash,b.size,o.normalized_extension,o.detected_format,o.mismatch,o.source_path,o.entry_index,{structural} FROM occurrences o JOIN objects b ON o.hash=b.hash WHERE {predicate} ORDER BY o.source_path,o.entry_index,o.id"))?;
+        let mut statement=self.connection.prepare(&format!("SELECT o.record,o.id,o.hash,b.size,o.normalized_extension,o.detected_format,o.mismatch,o.source_path,o.entry_index,{structural},a.occurrence_id,a.parent_id,a.parent_hash FROM occurrences o JOIN objects b ON o.hash=b.hash LEFT JOIN ancestry a ON a.occurrence_id=o.id WHERE {predicate} ORDER BY o.source_path,o.entry_index,o.id"))?;
         let mut query = statement.query(rusqlite::params_from_iter(values))?;
         let mut result = Vec::new();
         while let Some(row) = query.next()? {
@@ -462,18 +469,15 @@ impl Catalog {
                     && record.structural == row.get::<_, bool>(9)?,
                 "catalog record/index identity mismatch"
             );
-            let ancestry = self.connection.query_row(
-                "SELECT parent_id,parent_hash FROM ancestry WHERE occurrence_id=?1",
-                [&record.occurrence_id],
-                |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?)),
-            );
-            match (&record.nested, ancestry) {
-                (None, Err(rusqlite::Error::QueryReturnedNoRows)) => (),
-                (Some(n), Ok((parent, hash))) => ensure!(
-                    n.parent_occurrence_id == parent && n.parent_sha256 == hash,
+            let ancestor_id: Option<String> = row.get(10)?;
+            let parent: Option<String> = row.get(11)?;
+            let hash: Option<String> = row.get(12)?;
+            match (&record.nested, ancestor_id) {
+                (None, None) => (),
+                (Some(n), Some(_)) => ensure!(
+                    n.parent_occurrence_id == parent && Some(&n.parent_sha256) == hash.as_ref(),
                     "catalog nested provenance/index mismatch"
                 ),
-                (_, Err(e)) => return Err(e.into()),
                 _ => anyhow::bail!("catalog nested provenance/index mismatch"),
             }
             result.push(record);

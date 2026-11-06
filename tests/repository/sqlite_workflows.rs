@@ -358,3 +358,88 @@ fn tree_files(root: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
         })
         .collect()
 }
+
+#[test]
+fn batched_metadata_rejects_missing_objects_without_partial_publication() {
+    let t = tempfile::tempdir().unwrap();
+    let root = ingest(t.path());
+    let repo = Repository::existing(&root).unwrap();
+    let rows = metadata::load(&root).unwrap();
+    let mut first = rows[0].clone();
+    first.occurrence_id = metadata::digest(b"new batch first");
+    let mut missing = rows[1].clone();
+    missing.occurrence_id = metadata::digest(b"new batch missing");
+    missing.sha256 = metadata::digest(b"missing payload");
+    assert!(metadata::store_many(&repo, &[first.clone(), missing]).is_err());
+    assert!(
+        !metadata::load(&root)
+            .unwrap()
+            .iter()
+            .any(|r| r.occurrence_id == first.occurrence_id)
+    );
+    metadata::store_many(&repo, &[first]).unwrap();
+    assert_eq!(metadata::load(&root).unwrap().len(), rows.len() + 1);
+}
+
+#[test]
+fn export_zero_compression_stores_payloads_and_rejects_invalid_levels() {
+    let t = tempfile::tempdir().unwrap();
+    let root = ingest(t.path());
+    let output = t.path().join("stored.zip");
+    success(&[
+        "export",
+        text(&root),
+        "--compression-level",
+        "0",
+        "-o",
+        text(&output),
+        "--json",
+    ]);
+    let mut archive = zip::ZipArchive::new(fs::File::open(output).unwrap()).unwrap();
+    for i in 0..archive.len() {
+        assert_eq!(
+            archive.by_index(i).unwrap().compression(),
+            zip::CompressionMethod::Stored
+        );
+    }
+    assert!(
+        !cli(&[
+            "export",
+            text(&root),
+            "--compression-level",
+            "10",
+            "-o",
+            text(&t.path().join("invalid.zip"))
+        ])
+        .status
+        .success()
+    );
+}
+
+#[test]
+fn ingest_flushes_multiple_batches_and_tail_before_resume_checkpoint() {
+    let t = tempfile::tempdir().unwrap();
+    let archive = t.path().join("inputs.zip");
+    let names: Vec<_> = (0..257).map(|i| format!("entry-{i}.txt")).collect();
+    let entries: Vec<_> = names
+        .iter()
+        .map(|name| (name.as_str(), b"batch fixture".as_slice()))
+        .collect();
+    crate::common::archive(&archive, &entries);
+    let root = t.path().join("repo");
+    let args = [
+        "ingest",
+        text(&archive),
+        "--extract",
+        "--security-mode",
+        "standard",
+        "--resume",
+        "-o",
+        text(&root),
+        "--json",
+    ];
+    success(&args);
+    assert_eq!(metadata::load(&root).unwrap().len(), 257);
+    success(&args);
+    assert_eq!(metadata::load(&root).unwrap().len(), 257);
+}

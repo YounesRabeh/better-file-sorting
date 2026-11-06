@@ -70,25 +70,31 @@ fn run(cli: Cli) -> Result<u8> {
                 return Ok(0);
             }
             let records = bfsort::repository::metadata::select(repo.root(), &selected)?;
-            let unique = records
-                .iter()
-                .map(|r| &r.sha256)
-                .collect::<std::collections::BTreeSet<_>>()
-                .len();
-            let value = serde_json::json!({"occurrences":records.len(),"unique_objects":unique,"rows":records});
-            let human = records
-                .iter()
-                .map(|r| {
-                    format!(
-                        "{}  {}  {}",
-                        r.sha256,
-                        r.detection.detected_format.as_str(),
-                        bfsort::app::presentation::safe_text(&r.original_entry_name)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            output(ui, &value, &human)?;
+            if !ui.quiet {
+                if ui.json {
+                    let unique = records
+                        .iter()
+                        .map(|r| &r.sha256)
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len();
+                    let value = serde_json::json!({"occurrences":records.len(),"unique_objects":unique,"rows":records});
+                    output(ui, &value, "")?;
+                } else {
+                    let human = records
+                        .iter()
+                        .map(|r| {
+                            format!(
+                                "{}  {}  {}",
+                                r.sha256,
+                                r.detection.detected_format.as_str(),
+                                bfsort::app::presentation::safe_text(&r.original_entry_name)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    output(ui, &(), &human)?;
+                }
+            }
             Ok(0)
         }
         Command::Diff { left, right } => {
@@ -693,6 +699,7 @@ fn run(cli: Cli) -> Result<u8> {
             )?;
             let loaded = load(args.config.as_deref(), ui)?;
             let config = Config {
+                compression_level: args.compression_level.or(loaded.compression_level),
                 export_naming: args.naming.unwrap_or(loaded.export_naming),
                 filters: args.selection.resolve(loaded.filters)?,
                 resume: args.resume,

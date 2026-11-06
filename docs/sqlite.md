@@ -43,3 +43,5 @@ Retained view references enter SQLite before directory publication; a failed
 publication may conservatively pin data until an explicit recovery procedure.
 
 Schema version 2 adds structural archive ancestors and per-input operation outcomes. Version 1 catalogs remain readable without mutation and upgrade transactionally on the first write. Structural records preserve ancestry and payload references while remaining hidden from ordinary selections.
+
+Ingestion and derived copies publish metadata in batches of up to 128 occurrences, after their objects are durable. Completed input checkpoints are written only after the final metadata batch commits. Interrupted work can leave unreferenced objects, which remain subject to normal conservative cleanup. Writers validate existing relationships on opening and validate changed relationships per batch. Selections join ancestry in the same query rather than issuing one ancestry query per occurrence.
