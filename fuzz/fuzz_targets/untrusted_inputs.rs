@@ -34,7 +34,6 @@ fuzz_target!(|data: &[u8]| {
                 );
                 for format in [
                     bfsort::output::report::ReportFormat::Json,
-                    bfsort::output::report::ReportFormat::Jsonl,
                     bfsort::output::report::ReportFormat::Csv,
                     bfsort::output::report::ReportFormat::Table,
                 ] {

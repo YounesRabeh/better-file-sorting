@@ -143,34 +143,6 @@ cargo test --locked
 
 Tests use synthetic benign fixtures; HTTP tests start local servers.
 
-Source modules are grouped by responsibility:
-
-```text
-src/
-├── app/             CLI arguments, configuration and terminal output
-├── collection/      Discovery and downloading of remote archives
-├── detection/       Content formats and extension mismatch analysis
-├── ingest/          Local discovery, extraction and ingestion checkpoints
-├── repository/      Stored objects, metadata and permission safeguards
-├── organization/    Rules and repository views
-├── output/          ZIP I/O, portable exports and reports
-├── error.rs         Shared errors
-├── lib.rs
-└── main.rs
-
-tests/
-├── integration.rs   Cargo test entry point
-├── common/          Shared fixture helpers
-├── app/
-├── collection/
-├── detection/
-├── ingest/
-├── repository/
-├── organization/
-├── output/
-└── workflows/       Cross-command scenarios
-```
-
 ## Guides
 
 - [Command reference](docs/commands.md)
