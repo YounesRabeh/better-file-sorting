@@ -35,16 +35,6 @@ fn run(cli: Cli) -> Result<u8> {
                         bfsort::repository::metadata::import_jsonl(&repo, &input)? as u64,
                     )
                 }
-                MetadataCommand::Export {
-                    repository,
-                    output: destination,
-                } => {
-                    let repo = bfsort::repository::storage::Repository::existing(&repository)?;
-                    (
-                        "Exported",
-                        bfsort::repository::metadata::export_jsonl(&repo, &destination)? as u64,
-                    )
-                }
             };
             output(
                 ui,
@@ -112,31 +102,50 @@ fn run(cli: Cli) -> Result<u8> {
             selection,
             config,
             dry_run,
+            resume,
         } => derived(
             ui,
-            repositories,
-            destination,
-            bfsort::repository::derive::Kind::Merge,
+            bfsort::repository::derive::Options {
+                sources: repositories,
+                output: destination,
+                kind: bfsort::repository::derive::Kind::Merge,
+                dry_run,
+                resume,
+            },
             selection,
             config,
-            dry_run,
         ),
         Command::Sample {
             repository,
             count,
+            percentage,
             seed,
+            stratify,
+            unit,
             output: destination,
             selection,
             config,
             dry_run,
+            resume,
         } => derived(
             ui,
-            vec![repository],
-            destination,
-            bfsort::repository::derive::Kind::Sample { count, seed },
+            bfsort::repository::derive::Options {
+                sources: vec![repository],
+                output: destination,
+                kind: bfsort::repository::derive::Kind::Sample(
+                    bfsort::repository::derive::SampleOptions {
+                        count,
+                        percentage,
+                        seed,
+                        stratify,
+                        unit,
+                    },
+                ),
+                dry_run,
+                resume,
+            },
             selection,
             config,
-            dry_run,
         ),
         Command::Split {
             repository,
@@ -145,6 +154,7 @@ fn run(cli: Cli) -> Result<u8> {
             selection,
             config,
             dry_run,
+            resume,
         } => {
             let by = match by {
                 bfsort::app::cli::SplitBy::Extension => {
@@ -154,12 +164,15 @@ fn run(cli: Cli) -> Result<u8> {
             };
             derived(
                 ui,
-                vec![repository],
-                destination,
-                bfsort::repository::derive::Kind::Split { by },
+                bfsort::repository::derive::Options {
+                    sources: vec![repository],
+                    output: destination,
+                    kind: bfsort::repository::derive::Kind::Split { by },
+                    dry_run,
+                    resume,
+                },
                 selection,
                 config,
-                dry_run,
             )
         }
         Command::Status { root } => {
@@ -167,13 +180,20 @@ fn run(cli: Cli) -> Result<u8> {
             output(ui, &report, &serde_json::to_string_pretty(&report)?)?;
             Ok(0)
         }
-        Command::Retry { root, operation } => {
+        Command::Retry {
+            root,
+            operation,
+            failed,
+            inputs,
+        } => {
             let records = bfsort::operations::status(&root)?;
             let record = records
                 .iter()
                 .find(|r| r.id == operation)
                 .ok_or_else(|| anyhow::anyhow!("operation not found"))?;
-            let mut recorded = bfsort::operations::retry_arguments(&root, &operation)?.into_iter();
+            let mut recorded =
+                bfsort::operations::retry_selected_arguments(&root, &operation, failed, &inputs)?
+                    .into_iter();
             let mut args = Vec::new();
             while let Some(arg) = recorded.next() {
                 match arg.as_str() {
@@ -187,7 +207,6 @@ fn run(cli: Cli) -> Result<u8> {
             }
             let mut child = std::process::Command::new(std::env::current_exe()?);
             child
-                .args(args)
                 .env("BFSORT_RETRY_OF", &operation)
                 .current_dir(&record.cwd);
             for (enabled, flag) in [
@@ -209,7 +228,7 @@ fn run(cli: Cli) -> Result<u8> {
                     bfsort::app::cli::ColorMode::Never => "never",
                 },
             ]);
-            let status = child.status()?;
+            let status = child.args(args).status()?;
             Ok(status.code().unwrap_or(1).try_into().unwrap_or(1))
         }
         Command::Remove {
@@ -257,7 +276,7 @@ fn run(cli: Cli) -> Result<u8> {
             }
             let mut download = config.download.unwrap_or_default();
             if let Some(root) = args.output {
-                download.inventory = root.join("inventory.jsonl");
+                download.inventory = root.join("inventory.json");
                 download.staging_dir = root.join("downloads");
             }
             if let Some(workers) = args.workers {
@@ -270,7 +289,8 @@ fn run(cli: Cli) -> Result<u8> {
             } else {
                 Some(history(collection_root(&download), "collect")?)
             };
-            let inventory = if args.refresh || !download.inventory.try_exists()? {
+            let inventory_path = download.inventory_for_read()?;
+            let inventory = if args.refresh || !inventory_path.try_exists()? {
                 if args.dry_run && !ui.quiet && !ui.json {
                     eprintln!("Preview: requesting HTML metadata; no payloads will be downloaded.");
                 }
@@ -282,7 +302,7 @@ fn run(cli: Cli) -> Result<u8> {
                 }
                 inventory
             } else {
-                bfsort::collection::acquisition::load_inventory(&download.inventory)?
+                bfsort::collection::acquisition::load_inventory(&inventory_path)?
             };
             let result = download_inventory(
                 ui,
@@ -333,7 +353,8 @@ fn run(cli: Cli) -> Result<u8> {
         Command::Download(args) => {
             let config = load(args.config.as_deref(), ui)?;
             let download = config.download.unwrap_or_default();
-            let inventory = bfsort::collection::acquisition::load_inventory(&download.inventory)?;
+            let inventory =
+                bfsort::collection::acquisition::load_inventory(&download.inventory_for_read()?)?;
             let mut history = if args.dry_run {
                 None
             } else {
@@ -549,6 +570,7 @@ fn run(cli: Cli) -> Result<u8> {
             Ok(0)
         }
         Command::Analyze {
+            selection,
             repository,
             config,
             resume,
@@ -556,6 +578,7 @@ fn run(cli: Cli) -> Result<u8> {
         } => {
             let repo = bfsort::repository::storage::Repository::existing(&repository)?;
             let mut config = load(config.as_deref(), ui)?;
+            config.filters = selection.resolve(config.filters)?;
             config.resume = resume;
             config.input_mode = bfsort::app::config::InputMode::Archives;
             config.validate()?;
@@ -621,13 +644,16 @@ fn run(cli: Cli) -> Result<u8> {
             Ok(if report.failures > 0 { 1 } else { 0 })
         }
         Command::Reclassify {
+            selection,
+            config,
             repository,
             resume,
             dry_run,
         } => {
             let repo = bfsort::repository::storage::Repository::existing(&repository)?;
+            let selected = filters(&selection, config.as_deref(), ui)?;
             if dry_run {
-                let rows = bfsort::repository::metadata::load(repo.root())?;
+                let rows = bfsort::repository::metadata::select(repo.root(), &selected)?;
                 let hashes: std::collections::BTreeSet<_> =
                     rows.iter().map(|r| &r.sha256).collect();
                 output(
@@ -643,7 +669,9 @@ fn run(cli: Cli) -> Result<u8> {
             }
             let mut history = history(repo.root(), "reclassify")?;
             let cancelled = cancellation()?;
-            let result = bfsort::repository::metadata::reclassify(&repo, &cancelled, resume);
+            let result = bfsort::repository::metadata::reclassify_selected(
+                &repo, &cancelled, resume, &selected,
+            );
             if result.is_err() && cancelled.load(std::sync::atomic::Ordering::Relaxed) {
                 history.interrupt()?;
             }
@@ -663,8 +691,10 @@ fn run(cli: Cli) -> Result<u8> {
                 args.rules.as_deref(),
                 args.preset,
             )?;
+            let loaded = load(args.config.as_deref(), ui)?;
             let config = Config {
-                filters: filters(&args.selection, args.config.as_deref(), ui)?,
+                export_naming: args.naming.unwrap_or(loaded.export_naming),
+                filters: args.selection.resolve(loaded.filters)?,
                 resume: args.resume,
                 output: args.output,
                 zip: true,
@@ -718,8 +748,7 @@ fn run(cli: Cli) -> Result<u8> {
         } => {
             let repo = bfsort::repository::storage::Repository::existing(&repository)?;
             let catalog = bfsort::repository::catalog::read(repo.root())?;
-            let all = catalog.select(&Default::default(), false)?;
-            let referenced = all.iter().map(|r| r.sha256.clone()).collect();
+            let referenced = catalog.referenced_hashes()?;
             let records = catalog.select(&filters(&selection, config.as_deref(), ui)?, false)?;
             let summary =
                 bfsort::output::report::summary_with_references(&repo, &records, &referenced)?;
@@ -1042,20 +1071,12 @@ fn filters(
 
 fn derived(
     ui: &bfsort::app::cli::Presentation,
-    sources: Vec<std::path::PathBuf>,
-    destination: std::path::PathBuf,
-    kind: bfsort::repository::derive::Kind,
+    options: bfsort::repository::derive::Options,
     selection: bfsort::selection::Selection,
     config: Option<std::path::PathBuf>,
-    dry_run: bool,
 ) -> Result<u8> {
     let report = bfsort::repository::derive::run(
-        &bfsort::repository::derive::Options {
-            sources,
-            output: destination,
-            kind,
-            dry_run,
-        },
+        &options,
         &filters(&selection, config.as_deref(), ui)?,
         cancellation()?.as_ref(),
     )?;

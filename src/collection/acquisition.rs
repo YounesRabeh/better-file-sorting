@@ -198,7 +198,7 @@ pub struct DownloadConfig {
 impl Default for DownloadConfig {
     fn default() -> Self {
         Self {
-            inventory: "./collection/inventory.jsonl".into(),
+            inventory: "./collection/inventory.json".into(),
             staging_dir: "./collection/downloads".into(),
             max_files: None,
             max_file_size: None,
@@ -218,6 +218,24 @@ impl Default for DownloadConfig {
     }
 }
 impl DownloadConfig {
+    /// Read older default inventories without changing their names or rewriting them.
+    pub fn inventory_for_read(&self) -> Result<PathBuf> {
+        if self.inventory.try_exists()? {
+            return Ok(self.inventory.clone());
+        }
+        if self
+            .inventory
+            .file_name()
+            .is_some_and(|name| name == "inventory.json")
+        {
+            let legacy = self.inventory.with_file_name("inventory.jsonl");
+            if legacy.try_exists()? {
+                return Ok(legacy);
+            }
+        }
+        Ok(self.inventory.clone())
+    }
+
     pub fn speed(&self) -> Result<Option<u64>> {
         self.max_speed
             .as_deref()

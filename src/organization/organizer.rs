@@ -65,13 +65,6 @@ pub fn organize(repo: &Repository, rules: &Rules, plan: &[Planned]) -> Result<St
     serde_json::to_writer(&mut policy, rules)?;
     policy.as_file().sync_all()?;
     policy.persist_noclobber(staging.path().join("rules.json"))?;
-    let mut index = tempfile::NamedTempFile::new_in(staging.path())?;
-    for entry in plan {
-        serde_json::to_writer(&mut index, entry)?;
-        index.write_all(b"\n")?;
-    }
-    index.as_file().sync_all()?;
-    index.persist_noclobber(staging.path().join("layout.jsonl"))?;
     for entry in walkdir::WalkDir::new(staging.path())
         .contents_first(true)
         .follow_links(false)

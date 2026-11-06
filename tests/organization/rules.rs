@@ -9,6 +9,7 @@ use bfsort::{organization::rules::Rules, repository::metadata::Occurrence};
 /// Build a deterministic occurrence fixture for rules tests.
 fn row(name: &str, id: char, hash: char) -> Occurrence {
     Occurrence {
+        structural: false,
         nested: None,
         detection: Default::default(),
         mismatch: Default::default(),
@@ -195,4 +196,45 @@ fn automatic_directory_keeps_ambiguity_legacy_and_unsafe_extensions_separate() {
         plan.iter()
             .all(|p| !p.path.split('/').any(|component| component == ".."))
     );
+}
+
+#[test]
+fn export_naming_is_explicit_collision_safe_and_keeps_views_samples() {
+    use bfsort::{detection::classifier::Format, organization::rules::ExportNaming};
+    let rules = Rules::for_preset(Default::default());
+    let mut a = row("../CON.pdf", 'a', 'a');
+    a.original_stem = "../CON".into();
+    a.original_extension = "PDF".into();
+    a.detection.detected_format = Format::Pe;
+    let mut b = a.clone();
+    b.occurrence_id = "b".repeat(64);
+    b.sha256 = "b".repeat(64);
+    let rows = [a, b];
+    assert!(
+        rules
+            .plan(&rows)
+            .unwrap()
+            .iter()
+            .all(|p| p.path.ends_with(".sample"))
+    );
+    for (naming, extension) in [
+        (ExportNaming::Original, ".pdf"),
+        (ExportNaming::Detected, ".exe"),
+    ] {
+        let plan = rules.plan_export(&rows, naming).unwrap();
+        assert!(
+            plan.iter()
+                .all(|p| p.path.ends_with(extension) && !p.path.contains("../"))
+        );
+        assert_ne!(plan[0].path.to_lowercase(), plan[1].path.to_lowercase());
+    }
+    for format in [Format::Unknown, Format::Ambiguous, Format::NotEvaluated] {
+        let mut row = rows[0].clone();
+        row.detection.detected_format = format;
+        assert!(
+            rules.plan_export(&[row], ExportNaming::Detected).unwrap()[0]
+                .path
+                .ends_with(".sample")
+        );
+    }
 }

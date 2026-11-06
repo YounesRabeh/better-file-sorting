@@ -78,7 +78,30 @@ filename = "{sha256}.sample"
 Run with `--rules examples/rules.automatic.example.toml` instead of `--preset`.
 The first matching rule controls its output; everything else gets the automatic
 fallback. `{format_or_extension}` is a directory-only placeholder. Detection,
-confidence and original extension remain separately recorded in the portable manifest.
+confidence and original extension remain separately recorded in the repository catalog.
+
+## Payload names
+
+`--naming sample` is the default and keeps the rule-planned sample names. Repository
+views retain their existing naming policy regardless of export naming.
+`--naming original` uses each stored original stem and extension; extensions are
+normalized to lowercase. Missing original extensions fall back to `.sample`.
+`--naming detected` uses the original stem with the saved detected format's canonical
+extension. Both options sanitize names and resolve collisions deterministically.
+They can produce executable or script suffixes when explicitly selected.
+
+```sh
+bfsort export ./repository --naming original -o ./original-names.zip
+bfsort export ./repository --naming detected -o ./detected-names.zip
+```
+
+Detected extension mappings differ from format identifiers for PE (`exe`),
+JavaScript (`js`), PowerShell (`ps1`), Python (`py`), shell (`sh`), batch (`bat`),
+text (`txt`), gzip (`gz`), bzip2 (`bz2`), JPEG (`jpg`), TIFF (`tif`), Java class
+(`class`) and Zstandard (`zst`). Other known formats use their identifier as the
+extension, including `elf`, `macho`, `cfb`, and `7z`. Unknown, ambiguous and
+unevaluated detections use `.sample`; there is no filename-extension fallback
+under detected naming.
 
 ## ZIP structure
 
@@ -87,36 +110,23 @@ pdf.zip
 ├── pdf/
 │   ├── <sha256>.sample
 │   └── <sha256>-<occurrence-id>.sample
-├── export.json
-├── layout.jsonl
-└── manifest.jsonl
+└── export.json
 ```
 
-`export.json` declares `kind = "bfsort-export"`, `schema_version = 2`, and tool
-version. `layout.jsonl` maps exported paths to SHA-256 and occurrence identities.
-`manifest.jsonl` contains rows shaped as:
-
-```json
-{"path":"pdf/<sha256>.sample","occurrence":{"sha256":"<sha256>","original_name":"document.pdf"}}
-```
-
-The example abbreviates the occurrence object. Actual records include the full
-stored identity, size, original name/extension, archive entry, source provenance,
-detection/MIME/confidence/evidence/version and mismatch decision. Metadata retains
-original source paths, including local paths; consider that when sharing exports.
-Passwords and encryption keys are never included. With output encryption,
-metadata entries are encrypted with the payload entries.
-
-For custom duplicate policies that omit repeated payloads, the manifest still
-retains source occurrences associated with exported content and maps them to an
-included payload path. This metadata contract supports future merge/split tools;
-merge and split commands are not implemented.
+`export.json` is a compact report declaring `kind = "bfsort-export"`,
+`schema_version = 2`, and tool version. It reports payload and occurrence counts,
+unique object counts, logical/payload byte totals, and SHA-256 fingerprints of the
+planned layout and effective selected metadata. It does not export individual
+occurrence records, provenance paths, `layout.jsonl`, or `manifest.jsonl`.
+Passwords and encryption keys are never included. With output encryption, the
+report is encrypted with the payload entries.
 
 Normal export trusts repository content identities; it does not rehash source
-objects or perform an integrity audit. A consumer must verify payload hashes
-before trusting a shared portable manifest. Resumable export hashes the completed
-ZIP file to detect changes; recovery after publication without a saved receipt
-also verifies entries and both metadata indexes. See [recovery](recovery.md).
+objects or perform an integrity audit. Resumable export hashes completed ZIPs to
+detect changes. Recovery after publication without a saved receipt checks the
+report fingerprints and every planned payload path, size and hash. Previously
+published exports with legacy JSONL indexes remain readable for recovery; new
+exports do not create those indexes. See [recovery](recovery.md).
 
 ## Storage requirements
 
@@ -125,7 +135,5 @@ add another payload copy. Each exported collection is an additional compressed
 copy. Peak storage includes staging/output ZIPs as well as source archives and
 repository objects. Compression ratios are data-dependent.
 
-Schema 2 supports nested provenance in occurrence records. Each nested record
-retains its parent occurrence/hash, root identity, depth and entry-index chain.
-A parent may be outside the selected ZIP; hashes and IDs still preserve the link.
-Older export schemas are rejected during resume verification.
+Nested provenance remains in the source repository catalog. ZIP exports are
+payload collections with a compact report, not independent repositories.

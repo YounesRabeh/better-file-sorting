@@ -106,7 +106,7 @@ page = "https://example.org/downloads/"
 same_origin = true
 
 [download]
-inventory = "collection/inventory.jsonl"
+inventory = "collection/inventory.json"
 staging_dir = "collection/downloads"
 concurrency = 3
 order_by = "source"
@@ -169,3 +169,5 @@ values; matching exclusions win. A supplied CLI list replaces that TOML list.
 Optional `sha256`, `mismatch`, `min_size` and `max_size` fields correspond to the
 same CLI flags; sizes here are integer bytes with inclusive bounds. Unknown
 fields/formats and reversed size ranges fail configuration validation.
+
+Set `export_naming = "sample"`, `"original"` or `"detected"` in runtime configuration to choose ZIP payload suffixes; CLI `--naming` overrides it. Collection inventories now default to `inventory.json`; reads fall back to existing legacy `inventory.jsonl` without rewriting it.

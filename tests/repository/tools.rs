@@ -30,6 +30,23 @@ fn fixture(root: &std::path::Path, mode: SecurityMode, copies: usize) -> String 
     }
     hash
 }
+
+#[test]
+fn verification_reports_missing_retained_sql_view_generation() {
+    let t = tempfile::tempdir().unwrap();
+    let root = t.path().join("repo");
+    fixture(&root, SecurityMode::Standard, 1);
+    let repo = Repository::existing(&root).unwrap();
+    let rows = metadata::load(&root).unwrap();
+    let rules = bfsort::organization::rules::Rules::default();
+    let plan = rules.plan(&rows).unwrap();
+    let old = bfsort::organization::organizer::organize(&repo, &rules, &plan).unwrap();
+    bfsort::organization::organizer::organize(&repo, &rules, &plan).unwrap();
+    drop(repo);
+    fs::remove_dir_all(root.join("views").join(old)).unwrap();
+    let report = verify::run(&root, false, &AtomicBool::new(false)).unwrap();
+    assert!(!report.failures.is_empty());
+}
 #[test]
 fn verifies_unique_objects_and_detects_corruption() {
     let temp = tempfile::tempdir().unwrap();

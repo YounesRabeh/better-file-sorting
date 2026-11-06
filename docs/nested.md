@@ -25,7 +25,7 @@ input.zip                       source, depth 0
 
 repository/
 ├── objects/<prefix>/<sha256>    one object per distinct content hash
-├── manifests/*.jsonl            original and nested occurrences
+├── metadata.sqlite3             original and nested occurrences
 ├── operations/
 │   ├── extraction/*.json        direct-child extraction receipts
 │   ├── analysis/*.json          latest outcomes for each analysis root
@@ -38,7 +38,7 @@ Each nested occurrence includes a versioned `nested` object with parent hash,
 parent occurrence ID, root source/hash, containing archive depth and entry-index
 chain. Direct children of the original input have no parent occurrence because
 that outer source is not stored as a sample. Identical bytes are stored once;
-different source occurrences retain distinct links. ZIP exports retain these
+different source occurrences retain distinct links. The source SQLite catalog retains these
 fields even when a parent archive is outside the selected export group.
 
 ## Expand an existing repository
@@ -124,8 +124,7 @@ bfsort reclassify ./repository --resume
 ```
 
 This hash-verifies each unique stored object, detects it once, and updates mismatch
-results for all its occurrences. A complete classification sidecar publishes
-atomically; cancelled work leaves the previous sidecar intact. Per-object versioned
+results for all its occurrences. Classification updates commit atomically in SQLite; cancelled work preserves previous committed values. Per-object versioned
 checkpoints reuse completed detection. A new view uses saved grouping rules;
 repositories created before saved rules were introduced fall back to `by-format`.
 Classification and view publication are separate atomic steps: after a crash
@@ -137,3 +136,5 @@ stage durations. Parallel stage totals can overlap and exceed wall time. Hashing
 hash work; `hashing_seconds` and `detection_seconds` expose their measured costs separately. Progress
 shows elapsed time and counts without ETA. Actual savings depend on the filesystem,
 compression and duplicate frequency; use measured results rather than estimates.
+
+Filters also apply to nested ingestion and analysis. Traversal and budget accounting include excluded entries; required archive ancestors are retained as structural SQL records, hidden from ordinary selections. Reclassification accepts the same selectors. Changed nested filter settings require compatible recovery state or a fresh repository.

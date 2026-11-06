@@ -535,3 +535,239 @@ fn malformed_provenance_depth_is_rejected_before_traversal() {
     drop(connection);
     assert!(bfsort::repository::metadata::load(&repo).is_err());
 }
+
+#[test]
+fn filtered_nested_members_preserve_only_structural_zip_ancestry() {
+    let t = tempfile::tempdir().unwrap();
+    let child = t.path().join("child.zip");
+    archive(
+        &child,
+        &[
+            ("keep.pdf", b"%PDF-1.7\nfixture"),
+            ("drop.txt", b"excluded text"),
+        ],
+    );
+    let root = t.path().join("root.zip");
+    archive(
+        &root,
+        &[
+            ("container.zip", &fs::read(&child).unwrap()),
+            ("outer.txt", b"excluded outer text"),
+        ],
+    );
+    let config = t.path().join("nested.toml");
+    fs::write(&config,"input_mode='archives'\n[security]\nmode='standard'\n[archive]\nnested_extraction=true\nmax_depth=2\n[filters]\ninclude_extensions=['pdf']\n").unwrap();
+    let repo = t.path().join("repo");
+    let out = run(&[
+        "ingest".as_ref(),
+        root.as_os_str(),
+        "-c".as_ref(),
+        config.as_os_str(),
+        "-o".as_ref(),
+        repo.as_os_str(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let visible = bfsort::repository::metadata::load(&repo).unwrap();
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].original_name, "keep.pdf");
+    let all = bfsort::repository::metadata::load_all(&repo).unwrap();
+    assert_eq!(all.len(), 2);
+    let parent = all.iter().find(|r| r.structural).unwrap();
+    assert_eq!(
+        visible[0]
+            .nested
+            .as_ref()
+            .unwrap()
+            .parent_occurrence_id
+            .as_ref(),
+        Some(&parent.occurrence_id)
+    );
+    let excluded = bfsort::repository::metadata::digest(b"excluded text");
+    assert!(
+        !repo
+            .join("objects")
+            .join(&excluded[..2])
+            .join(excluded)
+            .exists()
+    );
+    assert!(
+        fs::read_dir(repo.join("manifests"))
+            .unwrap()
+            .next()
+            .is_none()
+    );
+    let again = run(&[
+        "ingest".as_ref(),
+        root.as_os_str(),
+        "-c".as_ref(),
+        config.as_os_str(),
+        "-o".as_ref(),
+        repo.as_os_str(),
+        "--resume".as_ref(),
+    ]);
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(
+        bfsort::repository::metadata::load_all(&repo).unwrap().len(),
+        2
+    );
+}
+
+#[test]
+fn filtered_members_still_charge_budget_and_filter_changes_reject_resume() {
+    let t = tempfile::tempdir().unwrap();
+    let root = t.path().join("root.zip");
+    archive(
+        &root,
+        &[
+            ("drop.txt", &[b'x'; 128]),
+            ("keep.pdf", b"%PDF-1.7\nfixture"),
+        ],
+    );
+    let config = t.path().join("filtered.toml");
+    let settings = "input_mode='archives'\n[security]\nmode='standard'\n[archive]\nnested_extraction=true\nmax_depth=1\nmax_total_expanded_bytes=64\n[filters]\ninclude_extensions=['pdf']\n";
+    fs::write(&config, settings).unwrap();
+    let repo = t.path().join("limited");
+    let out = run(&[
+        "ingest".as_ref(),
+        root.as_os_str(),
+        "-c".as_ref(),
+        config.as_os_str(),
+        "-o".as_ref(),
+        repo.as_os_str(),
+    ]);
+    assert!(!out.status.success());
+    assert!(
+        bfsort::repository::metadata::load(&repo)
+            .unwrap()
+            .is_empty()
+    );
+    fs::write(
+        &config,
+        settings.replace("max_total_expanded_bytes=64\n", ""),
+    )
+    .unwrap();
+    let repo = t.path().join("repo");
+    let run_ingest = || {
+        run(&[
+            "ingest".as_ref(),
+            root.as_os_str(),
+            "-c".as_ref(),
+            config.as_os_str(),
+            "-o".as_ref(),
+            repo.as_os_str(),
+            "--resume".as_ref(),
+        ])
+    };
+    assert!(run_ingest().status.success());
+    fs::write(
+        &config,
+        settings
+            .replace("max_total_expanded_bytes=64\n", "")
+            .replace("['pdf']", "['txt']"),
+    )
+    .unwrap();
+    let out = run_ingest();
+    assert!(!out.status.success());
+    let rows = bfsort::repository::metadata::load(&repo).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].original_name, "keep.pdf");
+}
+
+#[test]
+fn analyze_filters_descendants_without_filtering_existing_root_archives() {
+    let t = tempfile::tempdir().unwrap();
+    let root = t.path().join("root.zip");
+    archive(
+        &root,
+        &[("keep.pdf", b"%PDF-1.7\nfixture"), ("drop.txt", b"ignored")],
+    );
+    let repo = t.path().join("repo");
+    let out = run(&[
+        "ingest".as_ref(),
+        root.as_os_str(),
+        "--input-mode".as_ref(),
+        "files".as_ref(),
+        "--security-mode".as_ref(),
+        "standard".as_ref(),
+        "-o".as_ref(),
+        repo.as_os_str(),
+    ]);
+    assert!(out.status.success());
+    let config = t.path().join("analyze.toml");
+    fs::write(&config,"input_mode='archives'\n[archive]\nnested_extraction=true\nmax_depth=1\n[filters]\ninclude_extensions=['pdf']\n").unwrap();
+    let out = run(&[
+        "analyze".as_ref(),
+        repo.as_os_str(),
+        "-c".as_ref(),
+        config.as_os_str(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rows = bfsort::repository::metadata::load(&repo).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().any(|r| r.original_name == "keep.pdf"));
+    assert!(!rows.iter().any(|r| r.original_name == "drop.txt"));
+}
+
+#[test]
+fn later_descendant_selection_can_promote_structural_archives() {
+    let t = tempfile::tempdir().unwrap();
+    let inner = t.path().join("inner.zip");
+    archive(&inner, &[("keep.pdf", b"%PDF-1.7\nfixture")]);
+    let middle = t.path().join("middle.zip");
+    archive(&middle, &[("inner.zip", &fs::read(&inner).unwrap())]);
+    let root = t.path().join("root.zip");
+    archive(&root, &[("middle.zip", &fs::read(&middle).unwrap())]);
+    let config = t.path().join("nested.toml");
+    let settings = "input_mode='archives'\n[security]\nmode='standard'\n[archive]\nnested_extraction=true\nmax_depth=2\n[filters]\ninclude_extensions=['pdf']\n";
+    fs::write(&config, settings).unwrap();
+    let repo = t.path().join("repo");
+    let out = run(&[
+        "ingest".as_ref(),
+        root.as_os_str(),
+        "-c".as_ref(),
+        config.as_os_str(),
+        "-o".as_ref(),
+        repo.as_os_str(),
+    ]);
+    assert!(out.status.success());
+    assert_eq!(bfsort::repository::metadata::load(&repo).unwrap().len(), 1);
+    fs::write(&config, settings.replace("['pdf']", "['zip']")).unwrap();
+    let out = run(&[
+        "analyze".as_ref(),
+        repo.as_os_str(),
+        "-c".as_ref(),
+        config.as_os_str(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rows = bfsort::repository::metadata::load_all(&repo).unwrap();
+    assert!(
+        !rows
+            .iter()
+            .find(|r| r.original_name == "inner.zip")
+            .unwrap()
+            .structural
+    );
+    assert!(
+        rows.iter()
+            .find(|r| r.original_name == "middle.zip")
+            .unwrap()
+            .structural
+    );
+    assert_eq!(bfsort::repository::metadata::load(&repo).unwrap().len(), 2);
+}

@@ -246,16 +246,30 @@ fn legacy_defaults_and_explicit_analysis() {
         .status
         .success()
     );
-    // Convert this disposable exported snapshot into a pre-SQLite legacy fixture.
-    std::fs::remove_file(repo.join(bfsort::repository::catalog::FILE_NAME)).unwrap();
-    for entry in std::fs::read_dir(repo.join("manifests")).unwrap() {
-        let p = entry.unwrap().path();
-        let text = std::fs::read_to_string(&p).unwrap();
-        let mut r: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
-        r.as_object_mut().unwrap().remove("detection");
-        r.as_object_mut().unwrap().remove("mismatch");
-        std::fs::write(p, format!("{r}\n")).unwrap();
+    // Build an explicit legacy fixture; current ingestion writes only SQLite metadata.
+    let mut record =
+        serde_json::to_value(bfsort::repository::metadata::load(&repo).unwrap().remove(0)).unwrap();
+    record.as_object_mut().unwrap().remove("detection");
+    record.as_object_mut().unwrap().remove("mismatch");
+    let path = repo.join("manifests/legacy.jsonl");
+    std::fs::write(&path, format!("{record}\n")).unwrap();
+    bfsort::repository::security::seal(
+        &std::fs::File::open(&path).unwrap(),
+        bfsort::app::config::SecurityMode::Standard,
+    )
+    .unwrap();
+    let catalog = bfsort::repository::catalog::read(&repo).unwrap();
+    for generation in catalog.views().unwrap() {
+        let path = repo.join("views").join(&generation).join("layout.jsonl");
+        let mut file = std::fs::File::create(&path).unwrap();
+        bfsort::repository::security::seal(&file, bfsort::app::config::SecurityMode::Standard)
+            .unwrap();
+        for row in catalog.view_plan(&generation).unwrap() {
+            bfsort::repository::metadata::append(&mut file, &row).unwrap();
+        }
     }
+    drop(catalog);
+    std::fs::remove_file(repo.join(bfsort::repository::catalog::FILE_NAME)).unwrap();
     let records = bfsort::repository::metadata::load(&repo).unwrap();
     assert_eq!(
         records[0].detection.detected_format,
@@ -471,7 +485,7 @@ fn encrypted_ingestion_sealed_reports_and_export_refusal() {
         .unwrap()
         .to_owned();
     let object = repo.join("objects").join(&hash[..2]).join(&hash);
-    for format in ["table", "json", "jsonl", "csv"] {
+    for format in ["table", "json", "csv"] {
         let out = common::run(&[
             "report".as_ref(),
             "mismatches".as_ref(),
@@ -823,4 +837,72 @@ fn cab_rejects_missing_folder_table() {
             .as_str(),
         "cab"
     );
+}
+
+#[test]
+fn partial_reclassification_preserves_unselected_detection_and_writes_no_jsonl() {
+    use bfsort::{
+        repository::{metadata, storage::Repository},
+        selection::Filters,
+    };
+    let t = tempfile::tempdir().unwrap();
+    let inputs = t.path().join("inputs");
+    std::fs::create_dir(&inputs).unwrap();
+    std::fs::write(inputs.join("one.txt"), b"hello one").unwrap();
+    std::fs::write(inputs.join("two.pdf"), b"%PDF-1.7\nfixture").unwrap();
+    let root = t.path().join("repo");
+    let out = common::run(&[
+        "ingest".as_ref(),
+        inputs.as_os_str(),
+        "--input-mode".as_ref(),
+        "files".as_ref(),
+        "--security-mode".as_ref(),
+        "standard".as_ref(),
+        "-o".as_ref(),
+        root.as_os_str(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let repo = Repository::existing(&root).unwrap();
+    let mut rows = metadata::load(&root).unwrap();
+    for row in &mut rows {
+        row.detection.detector_version = "stale".into();
+    }
+    repo.with_catalog(|c| c.update_classifications(&rows))
+        .unwrap();
+    let filters = Filters {
+        include_extensions: vec!["txt".into()],
+        ..Default::default()
+    };
+    assert_eq!(
+        metadata::reclassify_selected(
+            &repo,
+            &std::sync::atomic::AtomicBool::new(false),
+            false,
+            &filters
+        )
+        .unwrap(),
+        1
+    );
+    let rows = metadata::load(&root).unwrap();
+    assert_eq!(
+        rows.iter()
+            .find(|r| r.original_extension == "pdf")
+            .unwrap()
+            .detection
+            .detector_version,
+        "stale"
+    );
+    assert_eq!(
+        rows.iter()
+            .find(|r| r.original_extension == "txt")
+            .unwrap()
+            .detection
+            .detector_version,
+        classifier::DETECTOR_VERSION
+    );
+    assert!(!root.join("reports/classification.jsonl").exists());
 }

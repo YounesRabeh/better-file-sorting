@@ -2,7 +2,7 @@
 use bfsort::{
     app::config::SecurityMode,
     repository::{
-        derive::{self, Kind, Options},
+        derive::{self, Kind, Options, SampleOptions, SamplingUnit},
         metadata::{self, Occurrence},
         storage::Repository,
     },
@@ -40,8 +40,15 @@ fn seeded_sample_is_independent_and_reproducible() {
             &Options {
                 sources: vec![input.clone()],
                 output: dir.path().join(name),
-                kind: Kind::Sample { count: 2, seed: 7 },
+                kind: Kind::Sample(SampleOptions {
+                    count: Some(2),
+                    percentage: None,
+                    seed: 7,
+                    stratify: vec![],
+                    unit: SamplingUnit::Occurrence,
+                }),
                 dry_run: false,
+                resume: false,
             },
             &Filters::default(),
             &AtomicBool::new(false),
@@ -51,8 +58,8 @@ fn seeded_sample_is_independent_and_reproducible() {
         assert_eq!(report.unique_objects, 1);
     }
     assert_eq!(
-        std::fs::read(dir.path().join("a/manifests/derived.jsonl")).unwrap(),
-        std::fs::read(dir.path().join("b/manifests/derived.jsonl")).unwrap()
+        serde_json::to_value(metadata::load(&dir.path().join("a")).unwrap()).unwrap(),
+        serde_json::to_value(metadata::load(&dir.path().join("b")).unwrap()).unwrap()
     );
     use std::os::unix::fs::MetadataExt;
     let object = format!(
@@ -78,6 +85,7 @@ fn sealed_preview_and_failed_copy_leave_destination_absent() {
         output: dir.path().join("dest"),
         kind: Kind::Merge,
         dry_run: true,
+        resume: false,
     };
     assert_eq!(
         derive::run(&options, &Filters::default(), &AtomicBool::new(false))
@@ -101,6 +109,7 @@ fn corruption_and_overlapping_paths_are_rejected_without_publication() {
         output: input.join("inside"),
         kind: Kind::Merge,
         dry_run: true,
+        resume: false,
     };
     assert!(derive::run(&options, &Filters::default(), &AtomicBool::new(false)).is_err());
     options.output = dir.path().join("dest");
@@ -125,6 +134,7 @@ fn split_publishes_independent_groups_and_never_overwrites() {
             by: SplitBy::Extension,
         },
         dry_run: false,
+        resume: false,
     };
     let report = derive::run(&options, &Filters::default(), &AtomicBool::new(false)).unwrap();
     assert_eq!(report.groups.len(), 1);
@@ -145,6 +155,7 @@ fn conflicting_occurrence_ids_fail_and_identical_records_deduplicate() {
         output: dir.path().join("dest"),
         kind: Kind::Merge,
         dry_run: true,
+        resume: false,
     };
     assert_eq!(
         derive::run(&options, &Filters::default(), &AtomicBool::new(false))
@@ -164,15 +175,22 @@ fn conflicting_occurrence_ids_fail_and_identical_records_deduplicate() {
 }
 
 #[test]
-fn nested_selection_and_oversized_samples_are_explicitly_refused() {
+fn oversized_samples_and_non_archive_ancestors_are_refused() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("source");
     source(&input, SecurityMode::Standard);
     let mut options = Options {
         sources: vec![input.clone()],
         output: dir.path().join("dest"),
-        kind: Kind::Sample { count: 4, seed: 0 },
+        kind: Kind::Sample(SampleOptions {
+            count: Some(4),
+            percentage: None,
+            seed: 0,
+            stratify: vec![],
+            unit: SamplingUnit::Occurrence,
+        }),
         dry_run: true,
+        resume: false,
     };
     let error = derive::run(&options, &Filters::default(), &AtomicBool::new(false)).unwrap_err();
     assert!(error.to_string().contains("eligible population"));
@@ -197,7 +215,7 @@ fn nested_selection_and_oversized_samples_are_explicitly_refused() {
     }
     options.kind = Kind::Merge;
     let error = derive::run(&options, &Filters::default(), &AtomicBool::new(false)).unwrap_err();
-    assert!(error.to_string().contains("ancestry closure"));
+    assert!(error.to_string().contains("ZIP container"));
     assert!(!options.output.exists());
 }
 
@@ -217,6 +235,7 @@ fn wrong_object_size_fails_even_in_metadata_preview() {
         output: dir.path().join("dest"),
         kind: Kind::Merge,
         dry_run: true,
+        resume: false,
     };
     let error = derive::run(&options, &Filters::default(), &AtomicBool::new(false)).unwrap_err();
     assert!(error.to_string().contains("size mismatch"));

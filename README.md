@@ -43,7 +43,7 @@ the existing SHA-256 object directories.
 - Archive-level ingestion resume and per-ZIP export recovery.
 - Metadata queries and filtering, repository verification, diff, merge, split and seeded sampling.
 - Operation history/retry, explicit occurrence removal and conservative orphan pruning.
-- Readable terminal summaries and clean JSON/JSONL/CSV output.
+- Readable terminal summaries and clean JSON/CSV output.
 - Optional resource budgets and deadlines, protected storage and cancellation.
 
 ## Quick start
@@ -101,7 +101,6 @@ work/
 ├── repository/
 │   ├── objects/                   Unique unpacked payloads
 │   ├── metadata.sqlite3           Authoritative metadata and relationships
-│   ├── manifests/                 JSONL compatibility snapshots
 │   ├── views/                     Rule-generated hard links or layout indexes
 │   └── operations/                Resume checkpoints
 └── exports/
@@ -112,10 +111,9 @@ work/
 
 Actual directories depend on selected rules and nonempty categories. Presets
 retain every source occurrence; duplicate content can appear multiple times in
-exports. Each ZIP includes a versioned header, layout index and full portable
-occurrence manifest. Merge, split and reproducible sampling create independent
+exports. Each ZIP includes payloads and a compact JSON export report. Merge, split and reproducible sampling create independent
 repositories; see [repository tools](docs/repository-tools.md).
-For legacy migration and JSONL interchange, see [SQLite metadata](docs/sqlite.md).
+For migration and legacy JSONL import, see [SQLite metadata](docs/sqlite.md).
 
 ## Storage and security
 

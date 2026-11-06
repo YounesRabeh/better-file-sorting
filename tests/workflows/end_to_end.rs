@@ -122,13 +122,27 @@ fn collect_reuses_refreshes_and_dry_run_never_fetches_payloads() {
     );
     let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(report["downloaded"], 5);
-    let inventory = std::fs::read(dir.path().join("collection/inventory.jsonl")).unwrap();
+    let inventory = std::fs::read(dir.path().join("collection/inventory.json")).unwrap();
+    assert!(!dir.path().join("collection/inventory.jsonl").exists());
+    std::fs::rename(
+        dir.path().join("collection/inventory.json"),
+        dir.path().join("collection/inventory.jsonl"),
+    )
+    .unwrap();
     let n = server.requests.lock().unwrap().len();
     let out = run(
         dir.path(),
         &["collect", "-o", "collection", "--dry-run", "--json"],
     );
     assert!(out.status.success());
+    assert_eq!(server.requests.lock().unwrap().len(), n);
+    assert!(!dir.path().join("collection/inventory.json").exists());
+    let download = run(dir.path(), &["download", "--dry-run", "--json"]);
+    assert!(
+        download.status.success(),
+        "{}",
+        String::from_utf8_lossy(&download.stderr)
+    );
     assert_eq!(server.requests.lock().unwrap().len(), n);
     let out = run(
         dir.path(),
@@ -192,14 +206,8 @@ fn ingest_defaults_to_files_and_extract_is_explicit() {
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        let manifest = std::fs::read_dir(dir.path().join(output).join("manifests"))
-            .unwrap()
-            .next()
-            .unwrap()
-            .unwrap()
-            .path();
-        let value: serde_json::Value =
-            serde_json::from_str(std::fs::read_to_string(manifest).unwrap().trim()).unwrap();
+        let records = bfsort::repository::metadata::load(&dir.path().join(output)).unwrap();
+        let value = serde_json::to_value(&records[0]).unwrap();
         assert_eq!(value["original_name"], expected);
     }
 }

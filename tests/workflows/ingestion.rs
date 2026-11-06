@@ -158,9 +158,17 @@ fn manifest_only_view_has_no_payload_links() {
     assert!(out.status.success());
     let current = std::fs::read_to_string(output.join("views/CURRENT")).unwrap();
     let view = output.join("views").join(current.trim());
-    assert_eq!(std::fs::read_dir(&view).unwrap().count(), 2);
+    assert_eq!(std::fs::read_dir(&view).unwrap().count(), 1);
     assert!(view.join("rules.json").is_file());
-    assert!(view.join("layout.jsonl").is_file());
+    assert!(!view.join("layout.jsonl").exists());
+    assert_eq!(
+        bfsort::repository::catalog::read(&output)
+            .unwrap()
+            .view_plan(current.trim())
+            .unwrap()
+            .len(),
+        1
+    );
     let rows = common::manifest(&output);
     let hash = rows[0]["sha256"].as_str().unwrap();
     assert_eq!(

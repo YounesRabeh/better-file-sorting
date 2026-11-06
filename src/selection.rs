@@ -120,25 +120,57 @@ impl Filters {
     }
 
     pub fn matches(&self, row: &Occurrence) -> bool {
-        let ext = crate::detection::mismatch::normalize_extension(&row.original_extension);
+        self.matches_fields(
+            &row.original_extension,
+            &row.detection,
+            &row.sha256,
+            row.size,
+            row.mismatch.status,
+        )
+    }
+
+    pub fn matches_file(
+        &self,
+        name: &str,
+        detection: &crate::detection::classifier::Detection,
+        sha: &str,
+        size: u64,
+    ) -> bool {
+        let basename = name.rsplit(['/', '\\']).next().unwrap_or("");
+        let extension = std::path::Path::new(basename)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        self.matches_fields(
+            extension,
+            detection,
+            sha,
+            size,
+            crate::detection::mismatch::evaluate(name, detection).status,
+        )
+    }
+
+    fn matches_fields(
+        &self,
+        extension: &str,
+        detection: &crate::detection::classifier::Detection,
+        sha: &str,
+        size: u64,
+        mismatch: Status,
+    ) -> bool {
+        let ext = crate::detection::mismatch::normalize_extension(extension);
         let extension_matches =
             |value: &String| crate::detection::mismatch::normalize_extension(value) == ext;
         (self.include_extensions.is_empty()
             || self.include_extensions.iter().any(extension_matches))
             && !self.exclude_extensions.iter().any(extension_matches)
             && (self.include_formats.is_empty()
-                || self
-                    .include_formats
-                    .contains(&row.detection.detected_format))
-            && !self
-                .exclude_formats
-                .contains(&row.detection.detected_format)
-            && self.sha256.as_ref().is_none_or(|hash| hash == &row.sha256)
-            && self
-                .mismatch
-                .is_none_or(|status| status == row.mismatch.status)
-            && self.min_size.is_none_or(|size| row.size >= size)
-            && self.max_size.is_none_or(|size| row.size <= size)
+                || self.include_formats.contains(&detection.detected_format))
+            && !self.exclude_formats.contains(&detection.detected_format)
+            && self.sha256.as_ref().is_none_or(|hash| hash == sha)
+            && self.mismatch.is_none_or(|status| status == mismatch)
+            && self.min_size.is_none_or(|min| size >= min)
+            && self.max_size.is_none_or(|max| size <= max)
     }
 
     pub fn retain(&self, rows: &mut Vec<Occurrence>) {
@@ -173,5 +205,20 @@ mod tests {
             .is_err()
         );
         assert!(parse_format("invalid").is_err());
+    }
+    #[test]
+    fn file_selection_uses_name_and_detected_content_independently() {
+        let detection = crate::detection::classifier::detect(b"%PDF-1.7\nfixture");
+        let filters = Filters {
+            include_extensions: vec![".TXT".into()],
+            include_formats: vec![Format::Pdf],
+            min_size: Some(3),
+            ..Default::default()
+        };
+        assert!(filters.matches_file("folder/renamed.txt", &detection, "hash", 3));
+        assert!(!filters.matches_file("folder/renamed.pdf", &detection, "hash", 3));
+        assert!(!filters.matches_file("folder/renamed.txt", &detection, "hash", 2));
+        let other = crate::detection::classifier::detect(b"plain prose");
+        assert!(!filters.matches_file("folder/renamed.txt", &other, "hash", 3));
     }
 }

@@ -26,7 +26,7 @@ pub struct Cli {
 }
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Migrate repository metadata or exchange JSONL without copying payloads
+    /// Migrate repository metadata or import legacy JSONL without copying payloads
     Metadata {
         #[command(subcommand)]
         command: MetadataCommand,
@@ -63,12 +63,26 @@ pub enum Command {
         config: Option<PathBuf>,
         #[arg(long)]
         dry_run: bool,
+        /// Verify and reuse completed copies from an interrupted operation
+        #[arg(long)]
+        resume: bool,
     },
     /// Select a reproducible subset into a new independent repository
     Sample {
         repository: PathBuf,
-        #[arg(long)]
-        count: usize,
+        #[arg(
+            long,
+            required_unless_present = "percentage",
+            conflicts_with = "percentage"
+        )]
+        count: Option<usize>,
+        #[arg(long, conflicts_with = "count")]
+        percentage: Option<f64>,
+        /// Proportional strata: ingestion date or detected format family
+        #[arg(long, value_enum, value_delimiter = ',')]
+        stratify: Vec<crate::repository::derive::Stratum>,
+        #[arg(long, value_enum, default_value = "unique-hash")]
+        unit: crate::repository::derive::SamplingUnit,
         #[arg(long, default_value_t = 0)]
         seed: u64,
         #[arg(short = 'o', long)]
@@ -79,6 +93,9 @@ pub enum Command {
         config: Option<PathBuf>,
         #[arg(long)]
         dry_run: bool,
+        /// Verify and reuse completed copies from an interrupted operation
+        #[arg(long)]
+        resume: bool,
     },
     /// Partition a standard repository into independent repositories
     Split {
@@ -93,6 +110,9 @@ pub enum Command {
         config: Option<PathBuf>,
         #[arg(long)]
         dry_run: bool,
+        /// Verify and reuse completed copies from an interrupted operation
+        #[arg(long)]
+        resume: bool,
     },
     /// Show recorded operation history and current ownership
     Status { root: PathBuf },
@@ -101,6 +121,12 @@ pub enum Command {
         root: PathBuf,
         #[arg(long)]
         operation: String,
+        /// Retry only failed, interrupted or unstarted recorded inputs
+        #[arg(long)]
+        failed: bool,
+        /// Retry these recorded ingestion inputs; repeat to select several
+        #[arg(long = "input")]
+        inputs: Vec<PathBuf>,
     },
     /// Logically remove selected occurrences; retained generations still pin data
     Remove {
@@ -154,6 +180,8 @@ pub enum Command {
     },
     /// Extract nested ZIP samples from an existing standard repository
     Analyze {
+        #[command(flatten)]
+        selection: crate::selection::Selection,
         /// Configuration enabling [archive] nested extraction and tree budgets
         #[arg(short = 'c', long)]
         config: Option<PathBuf>,
@@ -168,6 +196,10 @@ pub enum Command {
     },
     /// Refresh detection metadata without extracting archives
     Reclassify {
+        #[command(flatten)]
+        selection: crate::selection::Selection,
+        #[arg(short = 'c', long)]
+        config: Option<PathBuf>,
         #[arg(default_value = crate::app::config::DEFAULT_REPOSITORY)]
         repository: PathBuf,
         /// Reuse detection checkpoints after verifying stored object hashes
@@ -197,6 +229,9 @@ pub enum Command {
 }
 #[derive(Debug, Args)]
 pub struct Ingest {
+    /// Export archive samples with safe, original or detected filename suffixes
+    #[arg(long, value_enum)]
+    pub naming: Option<crate::organization::rules::ExportNaming>,
     #[command(flatten)]
     pub selection: crate::selection::Selection,
     /// Verify and reuse completed work from an earlier run
@@ -260,7 +295,7 @@ pub struct Acquire {
     /// Verify and reuse completed work from an earlier run
     #[arg(long)]
     pub resume: bool,
-    /// Optional runtime TOML; defaults read ./collection/inventory.jsonl
+    /// Optional runtime TOML; defaults read ./collection/inventory.json
     #[arg(short = 'c', long)]
     pub config: Option<PathBuf>,
     #[arg(long)]
@@ -289,7 +324,7 @@ pub struct Collect {
     pub url: Option<String>,
     #[arg(short = 'c', long)]
     pub config: Option<PathBuf>,
-    /// Collection root containing inventory.jsonl and downloads/
+    /// Collection root containing inventory.json and downloads/
     #[arg(short = 'o', long)]
     pub output: Option<PathBuf>,
     #[arg(short = 'j', long)]
@@ -366,6 +401,9 @@ pub struct MismatchArgs {
 }
 #[derive(Debug, Args)]
 pub struct Export {
+    /// Export archive samples with safe, original or detected filename suffixes
+    #[arg(long, value_enum)]
+    pub naming: Option<crate::organization::rules::ExportNaming>,
     #[command(flatten)]
     pub selection: crate::selection::Selection,
     #[arg(short = 'c', long)]
@@ -420,10 +458,4 @@ pub enum MetadataCommand {
     Migrate { repository: PathBuf },
     /// Import validated JSONL occurrences; referenced objects must already exist
     Import { repository: PathBuf, input: PathBuf },
-    /// Export active effective occurrences as private JSONL without replacing output
-    Export {
-        repository: PathBuf,
-        #[arg(short = 'o', long)]
-        output: PathBuf,
-    },
 }

@@ -99,6 +99,7 @@ pub struct Config {
     #[serde(skip)]
     pub operation_args: Option<Vec<String>>,
     pub filters: crate::selection::Filters,
+    pub export_naming: crate::organization::rules::ExportNaming,
     #[serde(skip)]
     /// Resolved receipt provenance indexed by canonical local input path.
     pub remote_inputs:
@@ -130,6 +131,7 @@ impl Default for Config {
         Self {
             operation_args: None,
             filters: Default::default(),
+            export_naming: Default::default(),
             remote_inputs: Default::default(),
             source: None,
             download: None,
@@ -188,6 +190,9 @@ impl Config {
     pub fn for_ingest(args: &Ingest) -> Result<Self> {
         let mut c = Self::load(args.config.as_deref())?;
         c.filters = args.selection.resolve(c.filters)?;
+        if let Some(naming) = args.naming {
+            c.export_naming = naming;
+        }
         if let Some(mode) = args.input_mode {
             c.input_mode = mode;
         }
@@ -259,10 +264,6 @@ impl Config {
     /// Validate worker, security, output, and extraction-limit settings.
     pub fn validate(&self) -> Result<()> {
         self.filters.validate()?;
-        anyhow::ensure!(
-            !self.archive.nested_extraction || self.filters.is_empty(),
-            "member filters with nested extraction are not supported; select a metadata view or export instead"
-        );
         let error = |s: &str| Error::Config(s.into());
         if let Some(source) = &self.source {
             if !source.page.is_empty() {

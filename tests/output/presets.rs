@@ -1,7 +1,7 @@
 use crate::common;
 use bfsort::organization::rules::{Preset, Rules};
 #[test]
-fn embedded_presets_and_portable_exports_preserve_provenance() {
+fn embedded_presets_and_exports_keep_report_without_record_indexes() {
     let t = tempfile::tempdir().unwrap();
     let input = t.path().join("mixed.zip");
     let root = t.path().join("repo");
@@ -57,25 +57,14 @@ fn embedded_presets_and_portable_exports_preserve_provenance() {
     let header: serde_json::Value =
         serde_json::from_reader(zip.by_name("export.json").unwrap()).unwrap();
     assert_eq!(header["schema_version"], 2);
-    use std::io::Read;
-    let mut text = String::new();
-    zip.by_name("manifest.jsonl")
-        .unwrap()
-        .read_to_string(&mut text)
-        .unwrap();
-    let rows: Vec<serde_json::Value> = text
-        .lines()
-        .map(|s| serde_json::from_str(s).unwrap())
-        .collect();
-    assert_eq!(rows.len(), 3);
-    assert!(
-        rows.iter()
-            .any(|r| r["occurrence"]["original_name"] == "a.PDF")
-    );
-    assert!(
-        rows.iter()
-            .all(|r| r["occurrence"]["detection"]["detected_format"] == "pdf")
-    );
+    assert_eq!(header["payload_entries"], 3);
+    assert_eq!(header["occurrences"], 3);
+    assert_eq!(header["unique_objects"], 1);
+    assert_eq!(header["layout_fingerprint"].as_str().unwrap().len(), 64);
+    assert_eq!(header["snapshot_fingerprint"].as_str().unwrap().len(), 64);
+    assert!(zip.by_name("manifest.jsonl").is_err());
+    assert!(zip.by_name("layout.jsonl").is_err());
+    assert_eq!(zip.len(), 4);
 }
 
 #[test]
@@ -166,7 +155,7 @@ fn resume_export_skips_verified_archives_and_rejects_tampering_or_changed_plan()
 }
 
 #[test]
-fn crash_recovery_rejects_corrupted_layout_metadata() {
+fn crash_recovery_rejects_corrupted_export_report() {
     use std::io::{Read, Write};
     let t = tempfile::tempdir().unwrap();
     let input = t.path().join("a.zip");
@@ -221,17 +210,18 @@ fn crash_recovery_rejects_corrupted_layout_metadata() {
         writer
             .start_file(&name, zip::write::SimpleFileOptions::default())
             .unwrap();
-        writer
-            .write_all(if name == "layout.jsonl" {
-                b"{\"sha256\":\"bogus\"}\n"
-            } else {
-                &bytes
-            })
-            .unwrap();
+        let bytes = if name == "export.json" {
+            let mut report: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            report["layout_fingerprint"] = "bogus".into();
+            serde_json::to_vec(&report).unwrap()
+        } else {
+            bytes
+        };
+        writer.write_all(&bytes).unwrap();
     }
     writer.finish().unwrap();
     let result = common::run(&args);
-    assert!(!result.status.success(), "corrupted layout was accepted");
+    assert!(!result.status.success(), "corrupted report was accepted");
 }
 
 #[test]
@@ -292,13 +282,10 @@ fn automatic_fallback_exports_each_dynamic_group_and_keeps_explicit_rules() {
         let mut zip =
             zip::ZipArchive::new(std::fs::File::open(output.join(format!("{group}.zip"))).unwrap())
                 .unwrap();
-        let mut manifest = String::new();
-        use std::io::Read;
-        zip.by_name("manifest.jsonl")
-            .unwrap()
-            .read_to_string(&mut manifest)
-            .unwrap();
-        assert_eq!(manifest.lines().count(), count);
+        let report: serde_json::Value =
+            serde_json::from_reader(zip.by_name("export.json").unwrap()).unwrap();
+        assert_eq!(report["payload_entries"], count);
+        assert!(zip.by_name("manifest.jsonl").is_err());
     }
     assert!(common::run(&args).status.success());
     let rows = bfsort::repository::metadata::load(&root).unwrap();
@@ -347,4 +334,90 @@ fn automatic_fallback_exports_each_dynamic_group_and_keeps_explicit_rules() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(direct.join("detected/pdf.zip").is_file());
+}
+
+#[test]
+fn explicit_export_naming_changes_payload_suffixes_without_changing_views() {
+    let t = tempfile::tempdir().unwrap();
+    let input = t.path().join("mixed.zip");
+    let root = t.path().join("repo");
+    common::archive(
+        &input,
+        &[
+            ("document.EXE", b"%PDF-1.7\n"),
+            ("empty.bin", b"\0\x01\x02"),
+        ],
+    );
+    let result = common::run(&[
+        "ingest".as_ref(),
+        input.as_os_str(),
+        "--extract".as_ref(),
+        "-o".as_ref(),
+        root.as_os_str(),
+        "--security-mode".as_ref(),
+        "standard".as_ref(),
+    ]);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let current = std::fs::read(root.join("views/CURRENT")).unwrap();
+    for (naming, expected) in [
+        ("sample", None),
+        ("original", Some("pdf/document.exe")),
+        ("detected", Some("pdf/document.pdf")),
+    ] {
+        let output = t.path().join(format!("{naming}.zip"));
+        let result = common::run(&[
+            "export".as_ref(),
+            root.as_os_str(),
+            "--naming".as_ref(),
+            naming.as_ref(),
+            "-o".as_ref(),
+            output.as_os_str(),
+        ]);
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(output).unwrap()).unwrap();
+        if let Some(expected) = expected {
+            assert!(zip.by_name(expected).is_ok());
+        } else {
+            assert!(zip.file_names().all(|name| {
+                name.is_ok_and(|name| name.ends_with(".sample") || name == "export.json")
+            }));
+        }
+        assert!(zip.by_name("layout.jsonl").is_err());
+        assert!(zip.by_name("manifest.jsonl").is_err());
+        assert_eq!(zip.len(), 3);
+        assert_eq!(std::fs::read(root.join("views/CURRENT")).unwrap(), current);
+    }
+    let generation = String::from_utf8(current).unwrap();
+    assert!(
+        !root
+            .join("views")
+            .join(generation.trim())
+            .join("layout.jsonl")
+            .exists()
+    );
+    let plan = bfsort::repository::catalog::read(&root)
+        .unwrap()
+        .view_plan(generation.trim())
+        .unwrap();
+    assert!(plan.iter().all(|p| p.path.ends_with(".sample")));
+}
+
+#[test]
+fn reports_keep_table_json_and_csv_without_jsonl_output() {
+    use bfsort::app::cli::Cli;
+    use clap::Parser;
+    for format in ["table", "json", "csv"] {
+        assert!(
+            Cli::try_parse_from(["bfsort", "report", "mismatches", "--format", format]).is_ok()
+        );
+    }
+    assert!(Cli::try_parse_from(["bfsort", "report", "mismatches", "--format", "jsonl"]).is_err());
 }

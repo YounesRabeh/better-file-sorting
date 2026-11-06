@@ -26,6 +26,50 @@ pub enum Preset {
     ByMismatch,
 }
 
+/// Payload suffix selection is confined to explicit ZIP exports.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, clap::ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportNaming {
+    #[default]
+    Sample,
+    Original,
+    Detected,
+}
+
+fn export_extension(row: &Occurrence, naming: ExportNaming) -> String {
+    use crate::detection::classifier::Format;
+    match naming {
+        ExportNaming::Sample => "sample".into(),
+        ExportNaming::Original => {
+            let extension =
+                crate::detection::mismatch::normalize_extension(&row.original_extension);
+            if extension.is_empty() {
+                "sample".into()
+            } else {
+                sanitize(&extension)
+            }
+        }
+        ExportNaming::Detected => match row.detection.detected_format {
+            Format::NotEvaluated | Format::Unknown | Format::Ambiguous => "sample",
+            Format::Pe => "exe",
+            Format::Javascript => "js",
+            Format::Powershell => "ps1",
+            Format::Python => "py",
+            Format::Shell => "sh",
+            Format::Batch => "bat",
+            Format::Text => "txt",
+            Format::Gzip => "gz",
+            Format::Bzip2 => "bz2",
+            Format::Jpeg => "jpg",
+            Format::Tiff => "tif",
+            Format::JavaClass => "class",
+            Format::Zstd => "zst",
+            format => format.as_str(),
+        }
+        .into(),
+    }
+}
+
 fn deserialize_rule_bytes<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> std::result::Result<Option<u64>, D::Error> {
@@ -406,9 +450,27 @@ impl Rules {
     }
     /// Build a deterministic, collision-safe logical view plan.
     pub fn plan(&self, records: &[Occurrence]) -> Result<Vec<Planned>> {
+        self.plan_named(records, None)
+    }
+
+    /// Keep grouping and duplicate policy while opting into ordinary payload suffixes.
+    pub fn plan_export(
+        &self,
+        records: &[Occurrence],
+        naming: ExportNaming,
+    ) -> Result<Vec<Planned>> {
+        self.plan_named(records, (naming != ExportNaming::Sample).then_some(naming))
+    }
+
+    fn plan_named(
+        &self,
+        records: &[Occurrence],
+        naming: Option<ExportNaming>,
+    ) -> Result<Vec<Planned>> {
         self.validate()?;
         ensure!(
-            self.organization.filename_policy == FilenamePolicy::Samples
+            naming.is_some()
+                || self.organization.filename_policy == FilenamePolicy::Samples
                 || records
                     .iter()
                     .all(|r| r.input_mode == crate::app::config::InputMode::Files),
@@ -459,7 +521,13 @@ impl Rules {
                 .collect::<Vec<_>>()
                 .join("/");
             let filename = render(filename, row, duplicate, self.organization.filename_policy);
-            let filename = if self.organization.filename_policy == FilenamePolicy::Samples {
+            let filename = if let Some(naming) = naming {
+                regular_filename(&format!(
+                    "{}.{}",
+                    sanitize(&row.original_stem),
+                    export_extension(row, naming)
+                ))
+            } else if self.organization.filename_policy == FilenamePolicy::Samples {
                 format!(
                     "{}.sample",
                     sanitize(filename.strip_suffix(".sample").expect("validated suffix"))

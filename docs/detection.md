@@ -26,13 +26,7 @@ Explicitly analyze an old **standard-mode** repository:
 bfsort reclassify ./repository --resume
 ```
 
-This hash-verifies each unique object and performs bounded classification, then
-atomically updates the SQLite classification metadata, then exports a compatibility
-`reports/classification.jsonl` snapshot. Original journals and payloads remain
-unchanged; legacy repositories import the old sidecar during migration. Analysis
-is cancellable; an interrupted transaction preserves the previous catalog values.
-After a successful transaction the catalog stays authoritative even if writing
-its compatibility snapshot fails. Per-object checkpoints reuse detection with `--resume`; objects are still hash-verified. A new view is published using saved grouping rules; older views fall back to `by-format`.
+This hash-verifies each selected unique object, performs bounded classification and atomically updates SQLite classification metadata. Legacy classification sidecars remain readable during migration; new runs do not write them. Cancellation preserves the previous committed catalog values. Per-object checkpoints reuse detection with `--resume`; objects are still hash-verified. A new view is published using saved grouping rules; older views fall back to `by-format`.
 Sealed repositories are refused; bfsort never changes payload permissions automatically.
 
 ## Supported identifiers and evidence
@@ -133,7 +127,7 @@ Neither produces a definitive mismatch. Extensionless files have their own statu
 bfsort report mismatches ./repository
 bfsort report mismatches ./repository --format csv --output mismatches.csv
 bfsort report mismatches ./repository --format json --output mismatches.json
-bfsort report mismatches ./repository --format jsonl --all
+bfsort report mismatches ./repository --format json --all
 bfsort report mismatches ./repository --status mismatch,ambiguous --min-confidence medium
 bfsort stats ./repository --json
 ```
@@ -141,7 +135,7 @@ bfsort stats ./repository --json
 Reports default to definitive mismatches. `--all` includes every status; explicit
 `--status` (repeatable or comma-separated) takes precedence. Confidence filtering
 applies to rows. Status counts cover **all** occurrences before row filtering.
-Table and JSON include those counts; CSV and JSONL contain selected rows only.
+Table and JSON include those counts; CSV contains selected rows only.
 `--json` changes the default table to JSON; an explicit non-table format wins.
 `--quiet` suppresses stdout, while `--output` still writes the requested artifact.
 Output files are created atomically and never replace an existing destination.

@@ -33,7 +33,7 @@ use std::{
     },
     time::Instant,
 };
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Failure {
     pub source_path: String,
     pub entry_index: Option<usize>,
@@ -67,20 +67,20 @@ pub struct RunReport {
     pub summary: report::Summary,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_failure: Option<Failure>,
+    pub failure_details: Vec<Failure>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub zip: Option<ZipSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nested: Option<crate::ingest::nested::TreeReport>,
 }
 struct Journal {
-    manifest: File,
-    failures_file: File,
     accepted: usize,
     skipped_files: usize,
     reused_occurrences: usize,
     failures: usize,
     bytes: u64,
     first_failure: Option<Failure>,
+    failure_details: Vec<Failure>,
 }
 impl Journal {
     /// Record one archive or entry failure in the run report.
@@ -90,22 +90,14 @@ impl Journal {
             entry_index: index,
             error: error.to_string(),
         };
-        metadata::append(&mut self.failures_file, &failure)?;
         if self.first_failure.is_none() {
-            self.first_failure = Some(failure);
+            self.first_failure = Some(failure.clone());
         }
+        self.failure_details.push(failure);
         self.failures += 1;
         Ok(())
     }
 }
-/// Create and synchronize a unique JSONL journal file.
-fn create_journal_file(root: &Path, directory: &str, run_id: &str) -> Result<File> {
-    let file = tempfile::NamedTempFile::new_in(root.join(directory))?;
-    let file = file.persist_noclobber(root.join(directory).join(format!("{run_id}.jsonl")))?;
-    File::open(root.join(directory))?.sync_all()?;
-    Ok(file)
-}
-
 /// Sort in disposable private storage; publish only a complete ZIP without overwriting.
 fn ingest_zip(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> Result<RunReport> {
     let started = Instant::now();
@@ -136,7 +128,7 @@ fn ingest_zip(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> Result<
     require_success(&report, "ZIP not published")?;
     let repo = Repository::existing(&staging.output)?;
     let records = metadata::load(repo.root())?;
-    let plan = rules.plan(&records)?;
+    let plan = rules.plan_export(&records, config.export_naming)?;
     let exports = archive::plan_exports(&plan, config, rules)?;
     let sizes: BTreeMap<_, _> = records.iter().map(|r| (&r.occurrence_id, r.size)).collect();
     let payload_bytes =
@@ -318,7 +310,11 @@ pub fn preview(config: &Config, cancelled: &AtomicBool) -> Result<Preview> {
         .into_values()
         .filter(|r| !removed.contains(&r.occurrence_id))
         .collect();
-    let mut plan = rules.plan(&records)?;
+    let mut plan = if config.zip_enabled() {
+        rules.plan_export(&records, config.export_naming)?
+    } else {
+        rules.plan(&records)?
+    };
     let archives = if config.zip_enabled() {
         archive::plan_exports(&plan, config, &rules)?
     } else {
@@ -400,8 +396,9 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
         security::private_dir(&checkpoint_dir)?;
     }
     let removed = crate::repository::cleanup::removed(repo.root())?;
-    let existing: BTreeMap<_, _> = metadata::load(repo.root())?
+    let existing: BTreeMap<_, _> = metadata::load_all(repo.root())?
         .into_iter()
+        .filter(|row| !removed.contains(&row.occurrence_id))
         .map(|record| (record.occurrence_id.clone(), record))
         .collect();
     let fingerprint = metadata::digest(
@@ -428,14 +425,13 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
     );
     let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let journal = Mutex::new(Journal {
-        manifest: create_journal_file(repo.root(), "manifests", &run_id)?,
-        failures_file: create_journal_file(repo.root(), "reports", &run_id)?,
         accepted: 0,
         skipped_files: 0,
         reused_occurrences: 0,
         failures: 0,
         bytes: 0,
         first_failure: None,
+        failure_details: vec![],
     });
     let progress =
         crate::app::presentation::Progress::new(Some(paths.len() as u64), "Organizing inputs");
@@ -448,28 +444,32 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(config.workers)
         .build()?;
+    let operation_id = history.as_ref().map(|guard| guard.id().to_owned());
+    if let Some(id) = &operation_id {
+        let pending: Vec<_> = paths
+            .iter()
+            .map(|p| crate::operations::InputOutcome {
+                source_path: p.to_string_lossy().into_owned(),
+                state: "pending".into(),
+                error: None,
+            })
+            .collect();
+        repo.with_catalog(|catalog| catalog.record_inputs(id, &pending))?;
+    }
     pool.install(|| {
         paths.par_iter().try_for_each(|path| -> Result<()> {
             if cancelled.load(Ordering::Relaxed) {
                 return Ok(());
             }
-            let work = || -> Result<()> {
+            let mut input_error: Option<String> = None;
+            let mut work = || -> Result<()> {
                 if config.archive.nested_extraction {
-                    let mut nested_manifest = create_journal_file(
-                        repo.root(),
-                        "manifests",
-                        &format!(
-                            "{run_id}-{}",
-                            metadata::digest(path.as_os_str().as_encoded_bytes())
-                        ),
-                    )?;
                     let result = crate::ingest::nested::ingest_root(
                         &repo,
                         path,
                         config,
                         cancelled,
                         &nested_cache,
-                        &mut nested_manifest,
                         &run_id,
                     )?;
                     let mut journal = journal
@@ -480,6 +480,14 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                     journal.failures += result.failures;
                     journal.bytes += result.metrics.decompressed_bytes;
                     if result.failures > 0 {
+                        input_error = Some(
+                            result
+                                .outcomes
+                                .iter()
+                                .filter_map(|o| o.diagnostic.as_deref())
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        );
                         journal.first_failure = Some(Failure {
                             source_path: path.to_string_lossy().into_owned(),
                             entry_index: None,
@@ -605,6 +613,7 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                                 &item.sha256,
                             ))?);
                             let record = Occurrence {
+                                structural: false,
                                 nested: None,
                                 detection,
                                 mismatch,
@@ -650,7 +659,7 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                             let mut journal = journal
                                 .lock()
                                 .map_err(|_| anyhow::anyhow!("journal lock poisoned"))?;
-                            metadata::publish(&repo, &mut journal.manifest, &record)?;
+                            metadata::store(&repo, &record)?;
                             completed_records.push(record);
                             journal.accepted += 1;
                             journal.bytes += item.size;
@@ -662,6 +671,7 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                             ));
                         }
                         Err(error) => {
+                            input_error = Some(error.to_string());
                             complete = false;
                             journal
                                 .lock()
@@ -695,10 +705,30 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
                 Ok(())
             };
             if let Err(error) = work() {
+                input_error = Some(error.to_string());
                 journal
                     .lock()
                     .map_err(|_| anyhow::anyhow!("journal lock poisoned"))?
                     .failure(path, None, &error)?;
+            }
+            if let Some(id) = &operation_id {
+                let state = if cancelled.load(Ordering::Relaxed) {
+                    "interrupted"
+                } else if input_error.is_some() {
+                    "failed"
+                } else {
+                    "completed"
+                };
+                repo.with_catalog(|catalog| {
+                    catalog.record_input(
+                        id,
+                        &crate::operations::InputOutcome {
+                            source_path: path.to_string_lossy().into_owned(),
+                            state: state.into(),
+                            error: input_error.map(|_| "input failed; inspect run report".into()),
+                        },
+                    )
+                })?;
             }
             {
                 let journal = journal
@@ -734,6 +764,7 @@ fn ingest_repository(config: &Config, cancelled: &AtomicBool, rules: &Rules) -> 
         bytes_per_second: journal.bytes as f64 / elapsed.max(f64::EPSILON),
         summary: report::summary(&repo, &records)?,
         first_failure: journal.first_failure,
+        failure_details: journal.failure_details,
         zip: None,
         nested: config
             .archive

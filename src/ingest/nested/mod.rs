@@ -131,16 +131,16 @@ struct PriorTask {
 }
 #[derive(Default)]
 pub struct Cache {
-    published: Mutex<std::collections::BTreeSet<String>>,
+    published: Mutex<BTreeMap<String, bool>>,
     prior: BTreeMap<(String, String), Vec<PriorTask>>,
     locks: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
 }
 impl Cache {
     pub fn with_records<'a>(records: impl IntoIterator<Item = &'a Occurrence>) -> Self {
         let mut cache = Self::default();
-        let mut ids = std::collections::BTreeSet::new();
+        let mut ids = BTreeMap::new();
         for row in records {
-            ids.insert(row.occurrence_id.clone());
+            ids.insert(row.occurrence_id.clone(), row.structural);
             if let Some(n) = &row.nested
                 && is_zip(&row.detection)
             {
@@ -220,14 +220,16 @@ fn verify(repo: &Repository, child: &Child, cancelled: &AtomicBool) -> Result<()
     Ok(())
 }
 fn policy(config: &Config) -> String {
-    metadata::digest(
-        format!(
-            "zip-receipt-1/{}/{:?}",
-            classifier::DETECTOR_VERSION,
-            config.limits
-        )
-        .as_bytes(),
-    )
+    let base = format!(
+        "zip-receipt-1/{}/{:?}",
+        classifier::DETECTOR_VERSION,
+        config.limits
+    );
+    if config.filters.is_empty() {
+        metadata::digest(base.as_bytes())
+    } else {
+        metadata::digest(format!("{base}/filters={:?}", config.filters).as_bytes())
+    }
 }
 fn receipt_path(repo: &Repository, hash: &str, policy: &str) -> std::path::PathBuf {
     repo.root()
@@ -266,7 +268,6 @@ pub fn ingest_root(
     config: &Config,
     cancelled: &AtomicBool,
     cache: &Cache,
-    journal: &mut File,
     run_id: &str,
 ) -> Result<TreeReport> {
     crate::ingest::discovery::check_path(path)?;
@@ -287,6 +288,7 @@ pub fn ingest_root(
         format!("encoded-path:{encoded}")
     });
     let root = Occurrence {
+        structural: false,
         nested: None,
         detection: Detection::default(),
         mismatch: Default::default(),
@@ -331,7 +333,6 @@ pub fn ingest_root(
         &security::passwords(config.password_file.as_deref())?,
         cancelled,
         cache,
-        journal,
     )?;
     if !cancelled.load(Ordering::Relaxed) {
         ensure!(
@@ -366,7 +367,7 @@ pub fn preview(repo: &Repository, config: &Config) -> Result<Preview> {
         crate::repository::cleanup::removed(repo.root())?.is_empty(),
         "nested analysis after logical removal requires a fresh repository"
     );
-    let records = metadata::load(repo.root())?;
+    let records = metadata::load_all(repo.root())?;
     let candidates: Vec<_> = records
         .iter()
         .filter(|r| {
@@ -426,21 +427,12 @@ pub fn analyze(repo: &Repository, config: &Config, cancelled: &AtomicBool) -> Re
         config.archive.nested_extraction,
         "analyze requires [archive] nested_extraction = true"
     );
-    let records = metadata::load(repo.root())?;
+    let records = metadata::load_all(repo.root())?;
     let cache = Cache::with_records(records.iter());
-    let mut journal = tempfile::NamedTempFile::new_in(repo.root().join("manifests"))?;
     let run_id = format!(
         "analysis-{}",
         chrono::Utc::now().format("%Y%m%dT%H%M%S%.9fZ")
     );
-    let path = repo
-        .root()
-        .join("manifests")
-        .join(format!("{run_id}.jsonl"));
-    // Publish the journal first: complete synced lines survive interruption and replay is idempotent.
-    let mut journal_file = journal.as_file_mut().try_clone()?;
-    journal.persist_noclobber(path)?;
-    File::open(repo.root().join("manifests"))?.sync_all()?;
     let mut report = TreeReport {
         schema_version: 1,
         ..Default::default()
@@ -483,7 +475,6 @@ pub fn analyze(repo: &Repository, config: &Config, cancelled: &AtomicBool) -> Re
             &passwords,
             cancelled,
             &cache,
-            &mut journal_file,
         )?;
         report.merge(next);
         progress.0.inc(1);

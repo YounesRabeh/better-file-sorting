@@ -36,7 +36,7 @@ pub struct Summary {
 }
 /// Summarize manifest occurrences, canonical objects, and storage usage.
 pub fn summary(repo: &Repository, records: &[Occurrence]) -> Result<Summary> {
-    let referenced = records.iter().map(|r| r.sha256.clone()).collect();
+    let referenced = crate::repository::catalog::read(repo.root())?.referenced_hashes()?;
     summary_with_references(repo, records, &referenced)
 }
 
@@ -194,7 +194,6 @@ pub enum ReportFormat {
     #[default]
     Table,
     Json,
-    Jsonl,
     Csv,
 }
 #[derive(Debug, Serialize)]
@@ -267,12 +266,6 @@ impl MismatchReport<'_> {
             ReportFormat::Json => {
                 serde_json::to_writer_pretty(&mut writer, self)?;
                 writeln!(writer)?;
-            }
-            ReportFormat::Jsonl => {
-                for row in &self.rows {
-                    serde_json::to_writer(&mut writer, row)?;
-                    writeln!(writer)?;
-                }
             }
             ReportFormat::Csv => {
                 writeln!(

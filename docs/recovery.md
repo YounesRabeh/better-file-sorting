@@ -60,7 +60,7 @@ fresh destination. For encrypted outputs, the supplied password must also open
 the exported metadata; no password or password digest is stored in checkpoints.
 
 A crash between ZIP publication and saving its receipt is recovered by validating
-payload hashes, the versioned export header, layout and full manifest before
+payload hashes, the versioned export header, compact export report and payload layout before
 recording completion. Unsupported or inconsistent checkpoints fail explicitly.
 
 A resumable output directory can contain completed ZIPs while the collection is
@@ -84,7 +84,7 @@ immediately. No user deadline is imposed when `timeout_seconds` is omitted.
 
 Entry-level extraction continuation and HTTP Range continuation are not implemented.
 Operation-level retry and new independent repository copies are described in
-[repository tools](repository-tools.md). Merge/split/sample copies cannot resume.
+[repository tools](repository-tools.md). Merge/split/sample support verified resume; see [datasets](datasets.md).
 
 ## Nested archives and reclassification
 
@@ -98,3 +98,5 @@ stored objects for integrity verification; it does not promise zero I/O.
 ZIP occurrences without original downloads. `bfsort reclassify REPOSITORY --resume`
 refreshes detection without decompression. See [nested extraction](nested.md) for
 journal publication, sealed access limits, depth semantics and failure statuses.
+
+For recorded ingestion inputs, use `bfsort retry REPOSITORY --operation ID --failed` or repeated `--input PATH`. Failed selection includes unstarted pending and interrupted inputs. Detailed failures remain in JSON run reports; SQLite stores input states and generic failure summaries.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Younidev. See LICENSE for license terms.
 
-//! Stores occurrence metadata in SQLite and exchanges validated JSONL snapshots.
+//! Stores occurrence metadata in SQLite and imports validated legacy JSONL snapshots.
 //! Content hashes identify objects; occurrence identities retain distinct source events.
 //! Legacy imports validate bounded records and tolerate interrupted final journal lines.
 //! SQLite owns current state; optional remote provenance preserves old-data compatibility.
@@ -19,6 +19,9 @@ use std::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Occurrence {
+    /// Retained solely to preserve archive ancestry for selected descendants.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub structural: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nested: Option<NestedProvenance>,
     #[serde(default)]
@@ -69,6 +72,10 @@ impl Occurrence {
     /// Validate identity and file-type fields loaded from a manifest.
     pub fn validate(&self) -> Result<()> {
         ensure!(
+            !self.structural || crate::ingest::nested::is_zip(&self.detection),
+            "structural occurrences must be traversable ZIP containers"
+        );
+        ensure!(
             valid_hash(&self.sha256) && valid_hash(&self.occurrence_id),
             "invalid manifest identity"
         );
@@ -103,16 +110,6 @@ pub fn append(writer: &mut fs::File, record: &impl Serialize) -> Result<()> {
     writer.sync_data()?;
     Ok(())
 }
-/// Publish metadata only after the referenced payload is durable, then emit JSONL compatibility data.
-pub fn publish(
-    repo: &super::storage::Repository,
-    writer: &mut fs::File,
-    record: &Occurrence,
-) -> Result<()> {
-    store(repo, record)?;
-    append(writer, record)
-}
-
 pub fn store(repo: &super::storage::Repository, record: &Occurrence) -> Result<()> {
     record.validate()?;
     let path = repo.object(&record.sha256)?;
@@ -173,26 +170,6 @@ pub fn import_jsonl(repo: &super::storage::Repository, input: &Path) -> Result<u
     }
     let rows: Vec<_> = rows.into_values().collect();
     repo.with_catalog(|catalog| catalog.insert_many(&rows))?;
-    Ok(rows.len())
-}
-
-/// Publish a portable active-metadata snapshot without reading payloads or replacing a file.
-pub fn export_jsonl(repo: &super::storage::Repository, output: &Path) -> Result<usize> {
-    crate::ingest::discovery::check_path(output)?;
-    ensure!(!output.try_exists()?, "metadata output already exists");
-    let parent = output
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    let rows = load(repo.root())?;
-    for row in &rows {
-        serde_json::to_writer(&mut file, row)?;
-        file.write_all(b"\n")?;
-    }
-    file.as_file().sync_all()?;
-    file.persist_noclobber(output)?;
-    fs::File::open(parent)?.sync_all()?;
     Ok(rows.len())
 }
 
@@ -306,17 +283,29 @@ pub fn reclassify(
     cancelled: &std::sync::atomic::AtomicBool,
     resume: bool,
 ) -> Result<usize> {
+    reclassify_selected(
+        repo,
+        cancelled,
+        resume,
+        &crate::selection::Filters::default(),
+    )
+}
+
+pub fn reclassify_selected(
+    repo: &crate::repository::storage::Repository,
+    cancelled: &std::sync::atomic::AtomicBool,
+    resume: bool,
+    filters: &crate::selection::Filters,
+) -> Result<usize> {
     use std::io::Read;
     use std::sync::atomic::Ordering;
     ensure!(
         repo.mode() == SecurityMode::Standard,
         "analysis requires a standard repository; sealed payloads are never unlocked automatically"
     );
-    let mut records = load_all(repo.root())?;
-    let removed = crate::repository::cleanup::removed(repo.root())?;
+    let mut records = select(repo.root(), filters)?;
     let total = records
         .iter()
-        .filter(|r| !removed.contains(&r.occurrence_id))
         .map(|r| &r.sha256)
         .collect::<std::collections::BTreeSet<_>>()
         .len();
@@ -327,9 +316,6 @@ pub fn reclassify(
     let checkpoint_dir = repo.root().join("reports/reclassification");
     security::private_dir(&checkpoint_dir)?;
     for record in &mut records {
-        if removed.contains(&record.occurrence_id) {
-            continue;
-        }
         ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
         if !cache.contains_key(&record.sha256) {
             let path = repo.object(&record.sha256)?;
@@ -393,23 +379,9 @@ pub fn reclassify(
         Some(records.len() as u64),
         "Publishing classifications",
     );
-    repo.with_catalog(|catalog| catalog.update_classifications(&records))?;
-    let directory = repo.root().join("reports");
-    let target = directory.join("classification.jsonl");
-    crate::ingest::discovery::check_path(&target)?;
-    if target.try_exists()? {
-        security::validate_file(&target, SecurityMode::Standard)?;
-    }
-    let mut file = tempfile::NamedTempFile::new_in(&directory)?;
-    for record in &records {
-        serde_json::to_writer(&mut file, record)?;
-        file.write_all(b"\n")?;
-        publication.0.inc(1);
-    }
-    file.as_file().sync_all()?;
     ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
-    file.persist(target)?;
-    fs::File::open(directory)?.sync_all()?;
+    repo.with_catalog(|catalog| catalog.update_classifications(&records))?;
+    publication.0.inc(records.len() as u64);
     drop(publication);
     let current = repo.root().join("views/CURRENT");
     crate::ingest::discovery::check_path(&current)?;
@@ -446,7 +418,7 @@ pub fn reclassify(
     } else {
         crate::organization::rules::Rules::load_or_preset(None, None)?
     };
-    records.retain(|r| !removed.contains(&r.occurrence_id));
-    crate::organization::organizer::organize(repo, &rules, &rules.plan(&records)?)?;
+    let active = load(repo.root())?;
+    crate::organization::organizer::organize(repo, &rules, &rules.plan(&active)?)?;
     Ok(records.len())
 }

@@ -29,8 +29,8 @@ same_origin = true
 
 # Persistent downloads and optional shared transfer budgets
 [download]
-# Path to the versioned discovery inventory (a JSON object despite the .jsonl suffix).
-inventory = "./collection/inventory.jsonl"
+# Path to the versioned discovery inventory JSON report.
+inventory = "./collection/inventory.json"
 # Private download root containing sealed payloads and completion receipts; files require explicit unlocking before ingest.
 staging_dir = "./collection/downloads"
 # Maximum uncached candidates attempted in one download invocation.

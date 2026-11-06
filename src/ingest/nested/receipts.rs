@@ -202,6 +202,15 @@ pub(super) fn direct(
                     file_type,
                     detection,
                 };
+                if !config.filters.matches_file(
+                    &child.name,
+                    &child.detection,
+                    &child.sha256,
+                    child.size,
+                ) && !is_zip(&child.detection)
+                {
+                    continue;
+                }
                 let start = Instant::now();
                 if let Err(error) = repo.commit(item.file, &child.sha256, child.size) {
                     result.errors.push(format!("object I/O error: {error}"));

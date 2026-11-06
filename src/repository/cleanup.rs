@@ -94,7 +94,9 @@ pub fn remove(root: &Path, filters: &Filters, dry_run: bool, confirm: bool) -> R
         "active operations prevent cleanup"
     );
     let _progress = crate::app::presentation::Progress::new(None, "Planning occurrence removal");
-    let rows = metadata::load(repo.root())?;
+    let mut rows = metadata::load_all(repo.root())?;
+    let removed = removed(repo.root())?;
+    rows.retain(|row| !removed.contains(&row.occurrence_id));
     let selected: BTreeSet<_> = metadata::select(repo.root(), filters)?
         .into_iter()
         .map(|r| r.occurrence_id)
@@ -136,15 +138,6 @@ pub fn remove(root: &Path, filters: &Filters, dry_run: bool, confirm: bool) -> R
         .len();
     if !dry_run && !selected.is_empty() {
         repo.with_catalog(|catalog| catalog.remove(&selected))?;
-        let ids = removed(repo.root())?;
-        publish(
-            repo.root(),
-            "removal.json",
-            &Removal {
-                schema_version: 1,
-                occurrence_ids: ids,
-            },
-        )?;
     }
     Ok(report)
 }
@@ -280,29 +273,13 @@ pub(crate) fn audit_metadata(repo: &Repository) -> Result<std::collections::BTre
         .iter()
         .map(|r| (r.occurrence_id.as_str(), r))
         .collect();
-    for entry in walkdir::WalkDir::new(repo.root().join("views")).follow_links(false) {
-        let entry = entry?;
-        if entry.file_name() != "layout.jsonl" {
-            continue;
-        }
-        let mut reader = BufReader::new(fs::File::open(entry.path())?);
-        loop {
-            let mut line = Vec::new();
-            let n = Read::take(&mut reader, 1024 * 1024 + 1).read_until(b'\n', &mut line)?;
-            if n == 0 {
-                break;
-            }
-            let value: serde_json::Value = serde_json::from_slice(&line)?;
-            let id = value["occurrence_id"]
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("invalid view occurrence reference"))?;
+    let catalog = super::catalog::read(repo.root())?;
+    for generation in catalog.views()? {
+        for view in catalog.view_plan(&generation)? {
             let row = identities
-                .get(id)
+                .get(view.occurrence_id.as_str())
                 .ok_or_else(|| anyhow::anyhow!("view references unknown occurrence"))?;
-            ensure!(
-                value["sha256"] == row.sha256,
-                "view hash reference mismatch"
-            );
+            ensure!(row.sha256 == view.sha256, "view hash reference mismatch");
             objects.insert(row.sha256.clone(), row.size);
         }
     }
@@ -442,7 +419,27 @@ fn validated_pins(repo: &Repository) -> Result<BTreeSet<String>> {
             .path()
             .strip_prefix(repo.root().join("reports"))?
             .to_path_buf();
-        if relative == Path::new("classification.jsonl") {
+        if relative == Path::new("dataset.json") {
+            security::validate_file(entry.path(), SecurityMode::Standard)?;
+            // Dataset reports scale with catalog rows, unlike small recovery records.
+            let limit = fs::metadata(repo.root().join(super::catalog::FILE_NAME))?
+                .len()
+                .saturating_mul(2)
+                .saturating_add(16 * 1024 * 1024);
+            ensure!(
+                fs::metadata(entry.path())?.len() <= limit,
+                "oversized dataset report"
+            );
+            let data: crate::repository::derive::DatasetReport =
+                serde_json::from_reader(BufReader::new(fs::File::open(entry.path())?))?;
+            ensure!(
+                data.schema_version == 1
+                    && valid_hash(&data.fingerprint)
+                    && data.selected_hashes.iter().all(|h| valid_hash(h))
+                    && data.selected_occurrence_ids.iter().all(|h| valid_hash(h)),
+                "invalid dataset report"
+            );
+        } else if relative == Path::new("classification.jsonl") {
             if !super::catalog::exists(repo.root())? {
                 pin_json_lines(entry.path(), &mut pins)?;
             }
@@ -514,6 +511,7 @@ fn validated_pins(repo: &Repository) -> Result<BTreeSet<String>> {
                     "bytes_per_second",
                     "summary",
                     "first_failure",
+                    "failure_details",
                     "zip",
                     "nested",
                 ];

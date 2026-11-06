@@ -18,7 +18,7 @@ use std::{
 };
 pub const FILE_NAME: &str = "metadata.sqlite3";
 const APPLICATION_ID: i64 = 0x42465331;
-const VERSION: i64 = 1;
+const VERSION: i64 = 2;
 pub struct Catalog {
     connection: Connection,
 }
@@ -70,7 +70,7 @@ fn validate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
     let app: i64 = connection.pragma_query_value(None, "application_id", |r| r.get(0))?;
     ensure!(
-        version == VERSION && app == APPLICATION_ID,
+        (version == 1 || version == VERSION) && app == APPLICATION_ID,
         "unsupported SQLite catalog schema or application identity"
     );
     Ok(())
@@ -78,18 +78,19 @@ fn validate(connection: &Connection) -> Result<()> {
 fn schema(connection: &Connection) -> Result<()> {
     connection.execute_batch("BEGIN;
 CREATE TABLE objects(hash TEXT PRIMARY KEY,size INTEGER NOT NULL CHECK(size>=0));
-CREATE TABLE occurrences(id TEXT PRIMARY KEY,hash TEXT NOT NULL REFERENCES objects(hash),normalized_extension TEXT NOT NULL,detected_format TEXT NOT NULL,mismatch TEXT NOT NULL,source_path TEXT NOT NULL,entry_index INTEGER NOT NULL CHECK(entry_index>=0),record TEXT NOT NULL);
+CREATE TABLE occurrences(id TEXT PRIMARY KEY,hash TEXT NOT NULL REFERENCES objects(hash),normalized_extension TEXT NOT NULL,detected_format TEXT NOT NULL,mismatch TEXT NOT NULL,source_path TEXT NOT NULL,entry_index INTEGER NOT NULL CHECK(entry_index>=0),record TEXT NOT NULL,structural INTEGER NOT NULL DEFAULT 0 CHECK(structural IN (0,1)));
 CREATE TABLE ancestry(occurrence_id TEXT PRIMARY KEY REFERENCES occurrences(id) DEFERRABLE INITIALLY DEFERRED,parent_id TEXT REFERENCES occurrences(id) DEFERRABLE INITIALLY DEFERRED,parent_hash TEXT NOT NULL);
 CREATE TABLE tombstones(id TEXT PRIMARY KEY);
 CREATE TABLE view_entries(generation TEXT NOT NULL,path TEXT NOT NULL,occurrence_id TEXT NOT NULL REFERENCES occurrences(id),hash TEXT NOT NULL REFERENCES objects(hash),PRIMARY KEY(generation,path));
 CREATE TABLE operations(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+CREATE TABLE operation_inputs(operation_id TEXT NOT NULL REFERENCES operations(id),source_path TEXT NOT NULL,state TEXT NOT NULL,error TEXT,PRIMARY KEY(operation_id,source_path));
 CREATE INDEX occurrences_hash ON occurrences(hash);
 CREATE INDEX occurrences_selection ON occurrences(normalized_extension,detected_format,mismatch);
 CREATE INDEX occurrences_order ON occurrences(source_path,entry_index,id);
 CREATE INDEX occurrences_format ON occurrences(detected_format);
 CREATE INDEX occurrences_mismatch ON occurrences(mismatch);
 CREATE INDEX objects_size ON objects(size);
-PRAGMA application_id=1111905073;PRAGMA user_version=1;COMMIT;")?;
+PRAGMA application_id=1111905073;PRAGMA user_version=2;COMMIT;")?;
     Ok(())
 }
 fn memory(root: &Path) -> Result<Catalog> {
@@ -122,6 +123,9 @@ pub fn write(root: &Path) -> Result<Catalog> {
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
         validate(&connection)?;
         configure(&connection, true)?;
+        if connection.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))? == 1 {
+            connection.execute_batch("BEGIN IMMEDIATE; ALTER TABLE occurrences ADD COLUMN structural INTEGER NOT NULL DEFAULT 0 CHECK(structural IN (0,1)); CREATE TABLE operation_inputs(operation_id TEXT NOT NULL REFERENCES operations(id),source_path TEXT NOT NULL,state TEXT NOT NULL,error TEXT,PRIMARY KEY(operation_id,source_path)); PRAGMA user_version=2; COMMIT;")?;
+        }
         return Ok(Catalog { connection });
     }
     let temporary = tempfile::NamedTempFile::new_in(root)?;
@@ -183,12 +187,20 @@ fn insert(connection: &Connection, row: &Occurrence) -> Result<()> {
                     && previous.size == row.size,
                 "conflicting occurrence metadata"
             );
+            if previous.structural && !row.structural {
+                let mut promoted = previous;
+                promoted.structural = false;
+                connection.execute(
+                    "UPDATE occurrences SET structural=0,record=?1 WHERE id=?2",
+                    params![serde_json::to_string(&promoted)?, row.occurrence_id],
+                )?;
+            }
             return Ok(());
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => (),
         Err(e) => return Err(e.into()),
     }
-    connection.execute("INSERT INTO occurrences(id,hash,normalized_extension,detected_format,mismatch,source_path,entry_index,record) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![row.occurrence_id,row.sha256,crate::detection::mismatch::normalize_extension(&row.original_extension),enum_text(&row.detection.detected_format)?,row.mismatch.status.as_str(),row.source_path,index,serde_json::to_string(row)?])?;
+    connection.execute("INSERT INTO occurrences(id,hash,normalized_extension,detected_format,mismatch,source_path,entry_index,record,structural) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![row.occurrence_id,row.sha256,crate::detection::mismatch::normalize_extension(&row.original_extension),enum_text(&row.detection.detected_format)?,row.mismatch.status.as_str(),row.source_path,index,serde_json::to_string(row)?,row.structural])?;
     if let Some(n) = &row.nested {
         connection.execute(
             "INSERT INTO ancestry(occurrence_id,parent_id,parent_hash) VALUES(?1,?2,?3)",
@@ -197,11 +209,18 @@ fn insert(connection: &Connection, row: &Occurrence) -> Result<()> {
     }
     Ok(())
 }
-fn predicate(filters: &Filters, include_removed: bool) -> Result<(String, Vec<Value>)> {
+fn predicate(
+    filters: &Filters,
+    include_removed: bool,
+    structural_supported: bool,
+) -> Result<(String, Vec<Value>)> {
     filters.validate()?;
     let mut clauses = Vec::new();
     let mut values = Vec::new();
     if !include_removed {
+        if structural_supported {
+            clauses.push("o.structural=0".into());
+        }
         clauses.push("NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.id=o.id)".to_owned());
     }
     for (column, list, exclude) in [
@@ -412,8 +431,17 @@ impl Catalog {
         Ok(())
     }
     pub fn select(&self, filters: &Filters, include_removed: bool) -> Result<Vec<Occurrence>> {
-        let (predicate, values) = predicate(filters, include_removed)?;
-        let mut statement=self.connection.prepare(&format!("SELECT o.record,o.id,o.hash,b.size,o.normalized_extension,o.detected_format,o.mismatch,o.source_path,o.entry_index FROM occurrences o JOIN objects b ON o.hash=b.hash WHERE {predicate} ORDER BY o.source_path,o.entry_index,o.id"))?;
+        let structural_supported =
+            self.connection
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?
+                >= 2;
+        let structural = if structural_supported {
+            "o.structural"
+        } else {
+            "0"
+        };
+        let (predicate, values) = predicate(filters, include_removed, structural_supported)?;
+        let mut statement=self.connection.prepare(&format!("SELECT o.record,o.id,o.hash,b.size,o.normalized_extension,o.detected_format,o.mismatch,o.source_path,o.entry_index,{structural} FROM occurrences o JOIN objects b ON o.hash=b.hash WHERE {predicate} ORDER BY o.source_path,o.entry_index,o.id"))?;
         let mut query = statement.query(rusqlite::params_from_iter(values))?;
         let mut result = Vec::new();
         while let Some(row) = query.next()? {
@@ -430,7 +458,8 @@ impl Catalog {
                     && enum_text(&record.detection.detected_format)? == row.get::<_, String>(5)?
                     && record.mismatch.status.as_str() == row.get::<_, String>(6)?
                     && record.source_path == row.get::<_, String>(7)?
-                    && i64::try_from(record.entry_index)? == row.get::<_, i64>(8)?,
+                    && i64::try_from(record.entry_index)? == row.get::<_, i64>(8)?
+                    && record.structural == row.get::<_, bool>(9)?,
                 "catalog record/index identity mismatch"
             );
             let ancestry = self.connection.query_row(
@@ -452,7 +481,11 @@ impl Catalog {
         Ok(result)
     }
     pub fn counts(&self, filters: &Filters) -> Result<Counts> {
-        let (predicate, values) = predicate(filters, false)?;
+        let structural_supported =
+            self.connection
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?
+                >= 2;
+        let (predicate, values) = predicate(filters, false, structural_supported)?;
         let (occurrences,unique_objects):(i64,i64)=self.connection.query_row(&format!("SELECT count(*),count(DISTINCT o.hash) FROM occurrences o JOIN objects b ON o.hash=b.hash WHERE {predicate}"),rusqlite::params_from_iter(values),|r|Ok((r.get(0)?,r.get(1)?)))?;
         Ok(Counts {
             occurrences: u64::try_from(occurrences)?,
@@ -499,6 +532,75 @@ impl Catalog {
         }
         transaction.commit()?;
         Ok(())
+    }
+    pub fn views(&self) -> Result<Vec<String>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT DISTINCT generation FROM view_entries ORDER BY generation")?;
+        Ok(statement
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+    pub fn view_plan(&self, generation: &str) -> Result<Vec<Planned>> {
+        let mut statement = self.connection.prepare(
+            "SELECT path,hash,occurrence_id FROM view_entries WHERE generation=?1 ORDER BY path",
+        )?;
+        Ok(statement
+            .query_map([generation], |r| {
+                Ok(Planned {
+                    path: r.get(0)?,
+                    sha256: r.get(1)?,
+                    occurrence_id: r.get(2)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+    pub fn record_input(
+        &mut self,
+        operation_id: &str,
+        input: &crate::operations::InputOutcome,
+    ) -> Result<()> {
+        self.record_inputs(operation_id, std::slice::from_ref(input))
+    }
+    pub fn record_inputs(
+        &mut self,
+        operation_id: &str,
+        inputs: &[crate::operations::InputOutcome],
+    ) -> Result<()> {
+        let transaction = self.connection.transaction()?;
+        for input in inputs {
+            ensure!(
+                !input.source_path.is_empty()
+                    && input.source_path.len() <= 16384
+                    && matches!(
+                        input.state.as_str(),
+                        "pending" | "completed" | "failed" | "interrupted"
+                    ),
+                "invalid input outcome"
+            );
+            transaction.execute("INSERT INTO operation_inputs(operation_id,source_path,state,error) VALUES(?1,?2,?3,?4) ON CONFLICT(operation_id,source_path) DO UPDATE SET state=excluded.state,error=excluded.error",params![operation_id,input.source_path,input.state,input.error])?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+    pub fn inputs(&self, operation_id: &str) -> Result<Vec<crate::operations::InputOutcome>> {
+        if self
+            .connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?
+            < 2
+        {
+            return Ok(vec![]);
+        }
+        let mut statement = self.connection.prepare("SELECT source_path,state,error FROM operation_inputs WHERE operation_id=?1 ORDER BY source_path")?;
+        Ok(statement
+            .query_map([operation_id], |r| {
+                Ok(crate::operations::InputOutcome {
+                    source_path: r.get(0)?,
+                    state: r.get(1)?,
+                    error: r.get(2)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?)
     }
     pub fn referenced_hashes(&self) -> Result<BTreeSet<String>> {
         let mut statement=self.connection.prepare("SELECT hash FROM occurrences o WHERE NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.id=o.id) UNION SELECT hash FROM view_entries UNION SELECT parent_hash FROM ancestry a JOIN occurrences o ON a.occurrence_id=o.id WHERE NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.id=o.id)")?;

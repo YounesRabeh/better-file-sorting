@@ -6,12 +6,20 @@ use crate::{
     repository::{catalog, security},
 };
 use anyhow::{Context, Result, ensure};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
 };
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputOutcome {
+    pub source_path: String,
+    pub state: String,
+    pub error: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -114,7 +122,7 @@ fn settings_files(
     use std::io::Read;
     let mut paths = Vec::new();
     let mut config_path = None;
-    for (i, arg) in args.iter().enumerate() {
+    for (i, arg) in args.iter().take_while(|a| a.as_str() != "--").enumerate() {
         if matches!(arg.as_str(), "--config" | "-c" | "--rules") {
             if let Some(path) = args.get(i + 1) {
                 paths.push(cwd.join(path));
@@ -245,6 +253,10 @@ fn validate_record(record: &Record) -> Result<()> {
 }
 
 impl Guard {
+    pub fn id(&self) -> &str {
+        &self.record.id
+    }
+
     pub fn start(root: &Path, command: &str, args: &[String]) -> Result<Self> {
         validate_arguments(command, args)?;
         ensure!(
@@ -386,6 +398,7 @@ pub fn status(root: &Path) -> Result<Vec<Record>> {
     if records.is_empty() && !directory.try_exists()? {
         ensure!(
             repository_root(root)?
+                || root.join("inventory.json").is_file()
                 || root.join("inventory.jsonl").is_file()
                 || root.join("downloads").is_dir(),
             "not a repository or collection root"
@@ -500,8 +513,147 @@ pub fn retry_arguments(root: &Path, id: &str) -> Result<Vec<String>> {
         .into_iter()
         .filter(|a| a != "--dry-run")
         .collect();
-    if !args.iter().any(|a| a == "--resume") {
-        args.push("--resume".into());
+    let options_end = args.iter().position(|a| a == "--").unwrap_or(args.len());
+    if !args[..options_end].iter().any(|a| a == "--resume") {
+        args.insert(options_end, "--resume".into());
     }
     Ok(args)
+}
+
+/// Select recorded ingest inputs while reusing the operation's verified resume settings.
+pub fn retry_selected_arguments(
+    root: &Path,
+    id: &str,
+    failed_only: bool,
+    inputs: &[PathBuf],
+) -> Result<Vec<String>> {
+    let args = retry_arguments(root, id)?;
+    if !failed_only && inputs.is_empty() {
+        return Ok(args);
+    }
+    let record = status(root)?
+        .into_iter()
+        .find(|r| r.id == id)
+        .context("operation not found")?;
+    ensure!(
+        record.command == "ingest",
+        "selected input retry is supported only for ingestion"
+    );
+    ensure!(
+        repository_root(root)? && catalog::exists(root)?,
+        "input outcomes are unavailable for this operation"
+    );
+    let outcomes = catalog::read(root)?.inputs(id)?;
+    let canonical = |path: &Path| -> Result<PathBuf> {
+        let path = record.cwd.join(path);
+        check_path(&path)?;
+        path.canonicalize().context("retry input is unavailable")
+    };
+    let eligible = |row: &InputOutcome| {
+        !failed_only || matches!(row.state.as_str(), "failed" | "interrupted" | "pending")
+    };
+    let mut selected = std::collections::BTreeSet::new();
+    if inputs.is_empty() {
+        for row in outcomes.iter().filter(|r| eligible(r)) {
+            selected.insert(canonical(Path::new(&row.source_path))?);
+        }
+    } else {
+        for path in inputs {
+            let path = canonical(path)?;
+            ensure!(
+                outcomes.iter().filter(|r| eligible(r)).any(|row| {
+                    canonical(Path::new(&row.source_path)).is_ok_and(|recorded| recorded == path)
+                }),
+                "retry input was not recorded with an eligible outcome"
+            );
+            selected.insert(path);
+        }
+    }
+    ensure!(
+        !selected.is_empty(),
+        "no recorded inputs match the retry selection"
+    );
+    let mut args = ingest_options(&args)?;
+    if !args.iter().any(|arg| arg == "--resume") {
+        args.push("--resume".into());
+    }
+    args.push("--".into());
+    for path in selected {
+        args.push(
+            path.to_str()
+                .context("retry input path must be UTF-8")?
+                .into(),
+        );
+    }
+    // Reparse the actual retry, including positional overrides of configured inputs.
+    Cli::try_parse_from(std::iter::once("bfsort".to_owned()).chain(args.iter().cloned()))?;
+    Ok(args)
+}
+
+/// Use clap's option declarations so flag values are never mistaken for input paths.
+fn ingest_options(args: &[String]) -> Result<Vec<String>> {
+    let command = Cli::command();
+    let ingest = command
+        .find_subcommand("ingest")
+        .expect("declared ingest command");
+    let mut longs = std::collections::BTreeMap::new();
+    let mut shorts = std::collections::BTreeMap::new();
+    for arg in command.get_arguments().chain(ingest.get_arguments()) {
+        if let Some(long) = arg.get_long() {
+            longs.insert(long, arg.get_action().takes_values());
+        }
+        if let Some(aliases) = arg.get_all_aliases() {
+            for alias in aliases {
+                longs.insert(alias, arg.get_action().takes_values());
+            }
+        }
+        if let Some(aliases) = arg.get_short_and_visible_aliases() {
+            for alias in aliases {
+                shorts.insert(alias, arg.get_action().takes_values());
+            }
+        }
+    }
+    let start = args
+        .iter()
+        .position(|arg| arg == "ingest")
+        .context("ingest command is missing")?
+        + 1;
+    let mut result = args[..start].to_vec();
+    let mut index = start;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--" {
+            break;
+        }
+        let takes_value = if let Some(long) = arg.strip_prefix("--") {
+            let (name, attached) = long
+                .split_once('=')
+                .map_or((long, false), |(name, _)| (name, true));
+            *longs.get(name).context("unknown recorded option")? && !attached
+        } else if let Some(short) = arg.strip_prefix('-').filter(|s| !s.is_empty()) {
+            let mut chars = short.chars().peekable();
+            let mut takes_value = false;
+            while let Some(name) = chars.next() {
+                if *shorts.get(&name).context("unknown recorded short option")? {
+                    takes_value = chars.peek().is_none();
+                    break;
+                }
+            }
+            takes_value
+        } else {
+            index += 1;
+            continue;
+        };
+        result.push(arg.clone());
+        if takes_value {
+            index += 1;
+            result.push(
+                args.get(index)
+                    .context("recorded option value is missing")?
+                    .clone(),
+            );
+        }
+        index += 1;
+    }
+    Ok(result)
 }

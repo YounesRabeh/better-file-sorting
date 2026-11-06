@@ -35,7 +35,7 @@ fn folder_sort_uses_rules_and_preserves_sources() {
             String::from_utf8_lossy(&out.stderr)
         );
     }
-    assert_eq!(common::manifest(&output).len(), 2);
+    assert_eq!(common::manifest(&output).len(), 1);
     let current = fs::read_to_string(output.join("views/CURRENT")).unwrap();
     assert!(
         output
@@ -82,7 +82,9 @@ fn zip_only_roundtrip_with_optional_password_and_no_overwrite() {
         let original_zip = fs::read(&output).unwrap();
         assert!(original_zip.len() < content.len());
         let mut zip = zip::ZipArchive::new(fs::File::open(&output).unwrap()).unwrap();
-        assert_eq!(zip.len(), 4); // one payload, layout, version and portable manifest
+        assert_eq!(zip.len(), 2); // one payload and export report
+        assert!(zip.by_name("layout.jsonl").is_err());
+        assert!(zip.by_name("manifest.jsonl").is_err());
         let index = (0..zip.len())
             .find(|i| {
                 zip.by_index_data(*i)
@@ -288,7 +290,7 @@ fn password_hardlinks_are_excluded_from_output() {
         String::from_utf8_lossy(&out.stderr)
     );
     let zip = zip::ZipArchive::new(fs::File::open(&output).unwrap()).unwrap();
-    assert_eq!(zip.len(), 4, "unexpected extra ZIP entries");
+    assert_eq!(zip.len(), 2, "unexpected extra ZIP entries");
     assert_eq!(
         zip.file_names()
             .filter(|name| name.as_ref().is_ok_and(|name| name.ends_with(".sample")))

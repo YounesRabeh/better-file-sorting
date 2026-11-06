@@ -34,25 +34,12 @@ bfsort split REPOSITORY --by format -o FORMAT_PARTITIONS
 bfsort merge LEFT RIGHT -o MERGED
 ```
 
-Destinations must not exist and their parent directory must already exist. Source aliases and overlapping source/destination paths are rejected. Publication uses private staging and an atomic no-replace directory rename, currently supported on Linux. A failed copy leaves the destination unpublished; abrupt termination can leave a private staging directory in the destination parent. No resume option is provided.
-
-Actual copying requires standard sources. A sealed source can participate in a metadata-only `--dry-run`, which publishes nothing and does not verify payload hashes. Actual copies stream and verify SHA-256 and size before publishing objects. Each destination stores each selected hash once, using copies rather than cross-repository hard links. Split partitions may independently contain copies of the same hash.
-
-`sample` selects occurrences without replacement after filtering and rejects a count above the eligible population. Ranking is ascending SHA-256 over the bytes `bfsort-sample-v1\0`, the seed as an unsigned 64-bit big-endian integer, and the ASCII occurrence ID; ties use the occurrence ID. The same seed and effective selected population reproduce the same subset. The default seed is zero.
-
-`split --by extension` uses the original extension, normalized to lowercase with leading dots removed. Group directory names are `ext-` followed by the UTF-8 bytes encoded as lowercase hexadecimal (for example, `txt` becomes `ext-747874`). Missing extensions use `unknown`. This encoding prevents source-controlled extensions from becoming paths. `--by format` uses the existing detected-format names, including explicit `unknown`, `ambiguous` and `not_evaluated` groups. Each group is a complete repository. The outer split directory is a container, not itself a repository.
-
-`merge` preserves provenance and effective detection metadata. Identical occurrence identities and records deduplicate; conflicting records fail. Different occurrence IDs sharing a hash remain distinct occurrences. Historical run IDs remain provenance; no source run is rewritten as a newly completed operation.
-
-Selected nested occurrences currently fail explicitly because ancestry closure has not been implemented. Choose a selection without nested occurrences until that contract is supported. Views, overlays, checkpoints, operation history and extraction receipts are not copied. Effective detection results are materialized in the destination SQLite catalog
-and its JSONL compatibility manifest.
-
-Dry-run reports selected occurrences, distinct objects, destination groups, estimated bytes to copy and ancestry additions (currently zero). Split byte estimates include an object's separate copies across groups. Sources remain unchanged by previews and copies.
+See [reproducible datasets](datasets.md) for unique-hash or occurrence sampling, percentage targets, ingestion-date/format-family stratification, nested ancestor closure, reproducibility reports and verified `--resume` for all three commands. Copies require standard sources, verify payload hashes and preserve provenance. Sealed sources support metadata-only dry-runs.
 
 ## Filtering existing workflows
 
 The same flags and `-c CONFIG` apply to `ingest`, `stats`, `report mismatches`,
-`reorganize`, and `export`. With no filters, existing behavior is preserved.
+`reorganize`, `analyze`, `reclassify`, and `export`. With no filters, existing behavior is preserved.
 An extension matches the original member/file name, never the safe `.sample`
 view suffix. Optional leading dots and case are normalized. Lists within one
 include dimension are ORed; nonempty dimensions and size/hash/mismatch criteria
@@ -65,16 +52,11 @@ budgets but are not published as objects/occurrences. In ordinary-file mode the
 input ZIP itself is selected. Selection does not change source files or delete
 previously ingested occurrences. Dry-run applies the same selection and tombstones.
 
-Filtering combined with nested extraction is explicitly unsupported; it could
-otherwise discard the parents needed to reach matching descendants. `analyze`
-and `reclassify` do not expose shared selection flags. `discover`/`download` keep
-existing resource-name policies and cannot evaluate formats inside archives.
-Selection settings participate in ingestion checkpoint compatibility. A changed
-selection reprocesses inputs rather than trusting an incomplete old selection.
+Nested extraction traverses excluded archives to reach matching descendants. Required stored ancestors are structural records, hidden from ordinary query/export selections. All extracted bytes still count against budgets. `analyze` filters published descendants; `reclassify` selects stored occurrences through SQL. Discover/download retain resource-name policies. Filters participate in checkpoint compatibility; incompatible nested checkpoints are rejected rather than reused.
 
 `stats` applies selection to logical occurrence/category counts; stored bytes,
 stored objects and orphan counts remain repository-wide. An orphan in this summary
-means unreferenced by active occurrence metadata; retained views or checkpoints
+means unreferenced by catalog records and retained views; recovery checkpoints
 can still pin it. Only prune's audited reachability decides reclamation.
 
 ## Operation history and retry
@@ -107,7 +89,7 @@ is `failed`; Ctrl+C records interruption where the cancellation path reports it.
 Retry starts a linked operation in the recorded working directory and reuses the
 original pipeline's verified `--resume` behavior. Configuration/rules fingerprints
 and application version must still match; protected password files must be
-supplied and valid again. Retry is whole-operation, not selected failed inputs.
+supplied and valid again. For recorded ingestion operations, `retry ROOT --operation ID --failed` selects failed, interrupted and pending inputs; repeated `--input PATH` selects recorded individual inputs. Other commands retry the whole operation.
 Downloads restart incomplete bodies and ordinary partial archives restart from
 the beginning. Existing output conflicts are preserved. Custom download staging
 may require consulting the configured control path rather than the conventional
@@ -123,9 +105,7 @@ bfsort prune ./repository --confirm
 ```
 
 Removal requires a nonempty selector and either dry-run or explicit confirmation.
-It atomically records occurrence IDs in SQLite tombstones and emits a compatibility
-`operations/removal.json` snapshot; original
-manifests and provenance remain intact. Queries, views and exports use the active
+It atomically records occurrence IDs in SQLite tombstones; original provenance remains intact. Queries, views and exports use the active
 metadata after tombstones. Reingesting the same occurrence identity does not
 resurrect it. Use a new repository if a fresh ingestion is intended.
 
@@ -151,4 +131,4 @@ unseals a payload or deletes sources. This is conservative storage reclamation,
 not secure erasure of file contents.
 
 See [SQLite metadata](sqlite.md) for catalog authority, explicit migration and
-JSONL import/export. Existing include/exclude flags keep the same meaning.
+legacy JSONL import. Existing include/exclude flags keep the same meaning.

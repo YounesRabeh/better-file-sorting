@@ -257,3 +257,136 @@ fn legacy_status_is_read_only_and_first_mutation_migrates_history() {
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().any(|r| r.id == old.id));
 }
+
+#[test]
+fn selected_retry_keeps_flags_and_only_uses_recorded_failed_inputs() {
+    use bfsort::operations::InputOutcome;
+    use clap::Parser;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("repo");
+    let _repo = Repository::open(&root, SecurityMode::Standard).unwrap();
+    let good = temp.path().join("good.txt");
+    let bad = temp.path().join("bad.pdf");
+    let arbitrary = temp.path().join("new.pdf");
+    let pending = temp.path().join("pending.txt");
+    for path in [&good, &bad, &arbitrary, &pending] {
+        std::fs::write(path, b"hello").unwrap();
+    }
+    let config = temp.path().join("bfs.toml");
+    std::fs::write(
+        &config,
+        format!("inputs = [{:?}]\n", good.to_str().unwrap()),
+    )
+    .unwrap();
+    let args = vec![
+        "ingest".into(),
+        good.to_str().unwrap().into(),
+        "--include-ext".into(),
+        "txt,pdf".into(),
+        "--include-ext=bin".into(),
+        "-j4".into(),
+        "-c".into(),
+        config.to_str().unwrap().into(),
+        bad.to_str().unwrap().into(),
+        config.to_str().unwrap().into(),
+    ];
+    let mut guard = Guard::start(&root, "ingest", &args).unwrap();
+    let id = guard.id().to_owned();
+    let mut db = catalog::write(&root).unwrap();
+    db.record_input(
+        &id,
+        &InputOutcome {
+            source_path: good.to_str().unwrap().into(),
+            state: "completed".into(),
+            error: None,
+        },
+    )
+    .unwrap();
+    db.record_input(
+        &id,
+        &InputOutcome {
+            source_path: bad.to_str().unwrap().into(),
+            state: "failed".into(),
+            error: Some("input failed; inspect command reports".into()),
+        },
+    )
+    .unwrap();
+    db.record_input(
+        &id,
+        &InputOutcome {
+            source_path: pending.to_str().unwrap().into(),
+            state: "pending".into(),
+            error: None,
+        },
+    )
+    .unwrap();
+    guard.finish(1).unwrap();
+    let retry = operations::retry_selected_arguments(&root, &id, true, &[]).unwrap();
+    assert!(retry.iter().any(|a| a == "txt,pdf"));
+    assert!(retry.iter().any(|a| a == "--include-ext=bin"));
+    assert!(retry.iter().any(|a| a == "-j4"));
+    let cli = bfsort::app::cli::Cli::try_parse_from(std::iter::once("bfsort".into()).chain(retry))
+        .unwrap();
+    let bfsort::app::cli::Command::Ingest(args) = cli.command else {
+        panic!("expected ingest")
+    };
+    assert_eq!(args.inputs, vec![bad.clone(), pending]);
+    assert_eq!(args.config.as_ref(), Some(&config));
+    assert!(args.resume);
+    assert!(operations::retry_selected_arguments(&root, &id, false, &[arbitrary]).is_err());
+    assert!(
+        operations::retry_selected_arguments(&root, &id, true, std::slice::from_ref(&good))
+            .is_err()
+    );
+    assert!(operations::retry_selected_arguments(&root, &id, false, &[good]).is_ok());
+    std::fs::write(config, "workers = 5\n").unwrap();
+    assert!(operations::retry_selected_arguments(&root, &id, true, &[]).is_err());
+}
+
+#[test]
+fn selected_retry_respects_end_of_options_and_non_ingest_rejection() {
+    use bfsort::operations::InputOutcome;
+    use clap::Parser;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("repo");
+    let _repo = Repository::open(&root, SecurityMode::Standard).unwrap();
+    let input = temp.path().join("--resume");
+    std::fs::write(&input, b"hello").unwrap();
+    let args = vec![
+        "ingest".into(),
+        "--recursive=false".into(),
+        "--".into(),
+        input.to_str().unwrap().into(),
+    ];
+    let mut guard = Guard::start(&root, "ingest", &args).unwrap();
+    let id = guard.id().to_owned();
+    catalog::write(&root)
+        .unwrap()
+        .record_input(
+            &id,
+            &InputOutcome {
+                source_path: input.to_str().unwrap().into(),
+                state: "interrupted".into(),
+                error: None,
+            },
+        )
+        .unwrap();
+    guard.finish(130).unwrap();
+    let retry = operations::retry_selected_arguments(&root, &id, true, &[]).unwrap();
+    let cli = bfsort::app::cli::Cli::try_parse_from(std::iter::once("bfsort".into()).chain(retry))
+        .unwrap();
+    let bfsort::app::cli::Command::Ingest(args) = cli.command else {
+        panic!("expected ingest")
+    };
+    assert_eq!(args.inputs, vec![input]);
+    assert_eq!(args.recursive, Some(false));
+    assert!(args.resume);
+    let mut other = Guard::start(
+        &root,
+        "reclassify",
+        &["reclassify".into(), root.to_str().unwrap().into()],
+    )
+    .unwrap();
+    other.finish(1).unwrap();
+    assert!(operations::retry_selected_arguments(&root, other.id(), true, &[]).is_err());
+}

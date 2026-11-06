@@ -7,7 +7,7 @@
 
 #![cfg(unix)]
 use crate::common;
-use std::{fs, io::Read, os::unix::fs::PermissionsExt};
+use std::{fs, os::unix::fs::PermissionsExt};
 
 fn fixture(root: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
     let input = root.join("input");
@@ -45,16 +45,14 @@ fn selected_directories_share_one_zip_without_duplicate_entries() {
         String::from_utf8_lossy(&out.stderr)
     );
     let mut zip = zip::ZipArchive::new(fs::File::open(&output).unwrap()).unwrap();
-    assert_eq!(zip.len(), 5);
+    assert_eq!(zip.len(), 3);
     assert!(zip.by_name("documents/pdf/a.pdf").is_ok());
     assert!(zip.by_name("documents/text/b.txt").is_ok());
     assert!(zip.by_name("other/c.bin").is_err());
-    let mut layout = String::new();
-    zip.by_name("layout.jsonl")
-        .unwrap()
-        .read_to_string(&mut layout)
-        .unwrap();
-    assert_eq!(layout.lines().count(), 2);
+    assert!(zip.by_name("layout.jsonl").is_err());
+    let report: serde_json::Value =
+        serde_json::from_reader(zip.by_name("export.json").unwrap()).unwrap();
+    assert_eq!(report["payload_entries"], 2);
 }
 
 #[test]
@@ -99,7 +97,7 @@ fn separate_zips_use_top_level_or_selected_nested_directories() {
             "documents.zip"
         };
         let mut zip = zip::ZipArchive::new(fs::File::open(output.join(name)).unwrap()).unwrap();
-        assert_eq!(zip.len(), if selected { 4 } else { 5 });
+        assert_eq!(zip.len(), if selected { 2 } else { 3 });
         assert!(
             zip.by_name_decrypt("documents/pdf/a.pdf", b"secret")
                 .is_ok()

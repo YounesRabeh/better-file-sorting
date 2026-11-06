@@ -54,12 +54,9 @@ pub fn ingest(input: &Path, output: &Path, workers: &str) -> Output {
 }
 /// Read all JSONL occurrence records from a test repository.
 pub fn manifest(root: &Path) -> Vec<serde_json::Value> {
-    let mut result = vec![];
-    for entry in std::fs::read_dir(root.join("manifests")).unwrap() {
-        let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
-        for line in text.lines() {
-            result.push(serde_json::from_str(line).unwrap());
-        }
-    }
-    result
+    bfsort::repository::metadata::load_all(root)
+        .unwrap()
+        .into_iter()
+        .map(|r| serde_json::to_value(r).unwrap())
+        .collect()
 }

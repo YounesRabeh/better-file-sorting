@@ -88,15 +88,18 @@ fn preview_matches_actual_layout_including_duplicates_and_existing_records() {
         String::from_utf8_lossy(&out.stderr)
     );
     let current = fs::read_to_string(repo.join("views/CURRENT")).unwrap();
-    let layout =
-        fs::read_to_string(repo.join("views").join(current.trim()).join("layout.jsonl")).unwrap();
-    let actual: Vec<serde_json::Value> = layout
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
-    for (planned, actual) in preview["plan"].as_array().unwrap().iter().zip(&actual) {
-        assert_eq!(planned["path"], actual["path"]);
-        assert_eq!(planned["sha256"], actual["sha256"]);
+    let actual = bfsort::repository::catalog::read(&repo)
+        .unwrap()
+        .view_plan(current.trim())
+        .unwrap();
+    assert_eq!(actual.len(), preview["plan"].as_array().unwrap().len());
+    for planned in preview["plan"].as_array().unwrap() {
+        let row = actual
+            .iter()
+            .find(|r| r.occurrence_id == planned["occurrence_id"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(planned["path"], row.path);
+        assert_eq!(planned["sha256"], row.sha256);
     }
     fs::remove_file(inputs.join("nested/a.txt")).unwrap();
     let out = common::run(&preview_args);

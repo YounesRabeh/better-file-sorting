@@ -24,7 +24,7 @@ Known totals include percentage and ETA; unknown work uses a spinner with elapse
 time. `--no-progress` hides loading indicators while retaining final results.
 
 `--json` writes machine-readable results without color or progress.
-JSON/JSONL/CSV mismatch formats never contain styling. `--quiet` suppresses
+JSON/CSV mismatch formats never contain styling. `--quiet` suppresses
 normal output, not errors. `--verbose` shows effective configuration, paths,
 workers, resource budgets and deadlines without exposing passwords.
 
@@ -123,7 +123,7 @@ bfsort stats ./repository
 bfsort stats ./repository --json
 bfsort report mismatches ./repository
 bfsort report mismatches ./repository --format csv -o ./mismatches.csv
-bfsort report mismatches ./repository --format jsonl --all
+bfsort report mismatches ./repository --format json --all
 bfsort report mismatches ./repository --status mismatch,ambiguous --min-confidence medium
 ```
 
@@ -133,7 +133,7 @@ distinguishes unique samples, occurrences and duplicate occurrences.
 
 Mismatch reports default to definitive mismatches. `--all` includes every status;
 explicit `--status` takes precedence. `--min-confidence` filters rows. Table and
-JSON include counts before filtering; CSV and JSONL contain selected rows only.
+JSON include counts before filtering; CSV contains selected rows only.
 `--output` writes atomically without replacing an existing file, even in quiet
 mode. A mismatch is not a malware verdict. See [detection](detection.md).
 
@@ -165,7 +165,7 @@ bfsort analyze ./repository -c ./examples/nested.toml --resume
 
 Reorganize adds a new view generation without extracting or reading payloads;
 old generations remain available. `reclassify` verifies and detects each unique
-stored object, publishes a complete classification sidecar, and rebuilds the view
+stored object, atomically updates SQLite classifications, and rebuilds the view
 using its saved rules (older views without saved rules use `by-format`). Its
 `--resume` option reuses per-object detection checkpoints; `--dry-run` lists the
 unique-object count and detector version without writing.
@@ -221,11 +221,10 @@ selection semantics, recovery history, and cleanup safeguards. `prune --confirm`
 reclaims only canonical objects with no recognized retained reference; removing
 an occurrence does not automatically reclaim its payload.
 
-## SQLite metadata and JSONL interchange
+## SQLite metadata and legacy JSONL import
 
 ```sh
 bfsort metadata migrate ./repository
-bfsort metadata export ./repository -o ./records.jsonl
 bfsort metadata import ./repository ./records.jsonl
 ```
 
@@ -234,3 +233,7 @@ explicit `metadata migrate`, atomically imports the existing records. Once prese
 `metadata.sqlite3` is authoritative. Import requires payload objects already in
 the destination; export contains only active effective metadata. See
 [SQLite metadata](sqlite.md) for backup, schema, privacy and recovery guarantees.
+
+Sample by percentage with `sample REPOSITORY --percentage 10 --stratify ingest-date,family --seed 7 -o SAMPLE`. The default unit is unique content hashes; `--unit occurrence` samples source events. Merge, split and sample accept `--resume`. See [datasets](datasets.md).
+
+Analyze and reclassify accept shared selection flags. Ingest and export accept `--naming sample|original|detected`; see [exports](exports.md). JSONL exporting is removed; reports support table, JSON and CSV. Legacy metadata import remains available.

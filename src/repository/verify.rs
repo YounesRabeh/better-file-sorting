@@ -2,11 +2,11 @@
 use super::{metadata, security, storage::Repository};
 use crate::{app::config::SecurityMode, ingest::discovery::check_path};
 use anyhow::{Result, ensure};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
     collections::BTreeMap,
     fs,
-    io::{BufRead, BufReader, Read},
+    io::Read,
     path::{Component, Path},
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -46,13 +46,6 @@ fn bounded_file(path: &Path, limit: u64) -> Result<fs::File> {
     );
     Ok(file)
 }
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ViewEntry {
-    path: String,
-    sha256: String,
-    occurrence_id: String,
-}
 fn views(
     repo: &Repository,
     records: &BTreeMap<&str, &metadata::Occurrence>,
@@ -71,6 +64,9 @@ fn views(
         );
         private_directory(&root.join(name))?;
     }
+    for generation in super::catalog::read(repo.root())?.views()? {
+        private_directory(&root.join(generation))?;
+    }
     for entry in fs::read_dir(&root)? {
         ensure!(!cancelled.load(Ordering::Relaxed), "interrupted");
         let entry = entry?;
@@ -81,18 +77,8 @@ fn views(
         private_directory(&generation)?;
         let rules: crate::organization::rules::Rules =
             serde_json::from_reader(bounded_file(&generation.join("rules.json"), 1024 * 1024)?)?;
-        let mut reader = BufReader::new(bounded_file(&generation.join("layout.jsonl"), u64::MAX)?);
-        loop {
-            let mut line = Vec::new();
-            let count = Read::take(&mut reader, 1024 * 1024 + 1).read_until(b'\n', &mut line)?;
-            if count == 0 {
-                break;
-            }
-            ensure!(
-                count <= 1024 * 1024 && line.ends_with(b"\n"),
-                "invalid view layout record"
-            );
-            let view: ViewEntry = serde_json::from_slice(&line)?;
+        let catalog = super::catalog::read(repo.root())?;
+        for view in catalog.view_plan(&entry.file_name().to_string_lossy())? {
             let path = Path::new(&view.path);
             ensure!(
                 !view.path.is_empty()

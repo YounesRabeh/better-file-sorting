@@ -187,7 +187,6 @@ pub(super) fn traverse(
     passwords: &[String],
     cancelled: &AtomicBool,
     cache: &Cache,
-    journal: &mut File,
 ) -> Result<TreeReport> {
     let (checkpoint_path, mut checkpoint) = checkpoint(repo, &task, config)?;
     preflight(repo, &task, config, cache, cancelled)?;
@@ -309,18 +308,25 @@ pub(super) fn traverse(
                     row.input_mode = InputMode::Archives;
                     row.mismatch =
                         crate::detection::mismatch::evaluate(&row.original_name, &row.detection);
+                    row.structural = !config.filters.matches(&row);
                     let start = Instant::now();
                     {
                         let mut published = cache
                             .published
                             .lock()
                             .map_err(|_| anyhow::anyhow!("occurrence lock poisoned"))?;
-                        if published.contains(&row.occurrence_id) {
-                            report.reused_occurrences += 1;
+                        if let Some(structural) = published.get_mut(&row.occurrence_id) {
+                            if *structural && !row.structural {
+                                metadata::store(repo, &row)?;
+                                *structural = false;
+                                report.accepted += 1;
+                            } else {
+                                report.reused_occurrences += usize::from(!row.structural);
+                            }
                         } else {
-                            metadata::publish(repo, journal, &row)?;
-                            published.insert(row.occurrence_id.clone());
-                            report.accepted += 1;
+                            metadata::store(repo, &row)?;
+                            published.insert(row.occurrence_id.clone(), row.structural);
+                            report.accepted += usize::from(!row.structural);
                         }
                     }
                     report.metrics.metadata_seconds += start.elapsed().as_secs_f64();
@@ -361,7 +367,6 @@ pub(super) fn traverse(
             .join(format!("{operation}.json")),
         &report,
     )?;
-    journal.sync_all()?;
     checkpoint.completed = !outer && report.failures == 0 && !cancelled.load(Ordering::Relaxed);
     atomic_json(&checkpoint_path, &checkpoint)?;
     Ok(report)

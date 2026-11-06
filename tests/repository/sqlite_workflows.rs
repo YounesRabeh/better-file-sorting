@@ -174,22 +174,27 @@ fn ingest_catalog_is_private_metadata_and_ignores_stale_jsonl() {
 }
 
 #[test]
-fn export_import_roundtrip_and_no_clobber() {
+fn legacy_import_remains_available_without_jsonl_export() {
     let tmp = tempfile::tempdir().unwrap();
     let root = ingest(tmp.path());
     let exported = tmp.path().join("exchange.jsonl");
-    success(&[
-        "metadata",
-        "export",
-        text(&root),
-        "-o",
-        text(&exported),
-        "--json",
-    ]);
     assert!(
         !cli(&["metadata", "export", text(&root), "-o", text(&exported)])
             .status
             .success()
+    );
+    assert!(!exported.exists());
+    // A legacy input fixture is still accepted for one-time migration.
+    let mut bytes = Vec::new();
+    for row in metadata::load(&root).unwrap() {
+        bytes.extend(serde_json::to_vec(&row).unwrap());
+        bytes.push(b'\n');
+    }
+    private_write(&exported, &bytes);
+    assert!(
+        tree_files(&root)
+            .keys()
+            .all(|p| p.extension().is_none_or(|e| e != "jsonl"))
     );
     let destination = tmp.path().join("imported");
     {
@@ -299,16 +304,13 @@ fn tombstones_reclassification_and_interchange_agree() {
     assert_eq!(count(&root, &[]), 1);
     success(&["reclassify", text(&root), "--json"]);
     assert_eq!(count(&root, &["--include-ext", "pdf"]), 0);
-    let exported = tmp.path().join("active.jsonl");
-    success(&[
-        "metadata",
-        "export",
-        text(&root),
-        "-o",
-        text(&exported),
-        "--json",
-    ]);
-    assert_eq!(fs::read_to_string(exported).unwrap().lines().count(), 1);
+    assert!(
+        tree_files(&root)
+            .keys()
+            .all(|p| p.extension().is_none_or(|e| e != "jsonl"))
+    );
+    let stats = success(&["stats", text(&root), "--json"]);
+    assert_eq!(stats["occurrences"], 1);
     success(&["verify", text(&root), "--full", "--json"]);
     success(&["prune", text(&root), "--dry-run", "--json"]);
 }

@@ -152,11 +152,12 @@ fn discover_url_cli_writes_default_inventory_without_config() {
         String::from_utf8_lossy(&output.stderr)
     );
     let inventory = bfsort::collection::acquisition::load_inventory(
-        &temp.path().join("collection/inventory.jsonl"),
+        &temp.path().join("collection/inventory.json"),
     )
     .unwrap();
     assert_eq!(inventory.candidates.len(), 1);
     assert_eq!(inventory.candidates[0].name, "fixture.zip");
+    assert!(!temp.path().join("collection/inventory.jsonl").exists());
 }
 
 #[test]
